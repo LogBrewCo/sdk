@@ -39,6 +39,11 @@ type CreateLogBrewReactNativeClientConfig = {
   onEventDropped?: (drop: DroppedEvent) => void;
   sdkName?: string;
   sdkVersion?: string;
+  /**
+   * Adds `context.session.id` to every event. The app keeps 1 session ID in memory.
+   * It ends after 30 minutes without events or 4 hours after it starts. `false` sends no session ID. A `session` in `context` replaces it.
+   */
+  session?: boolean;
   transport?: Transport;
 };
 

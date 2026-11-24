@@ -7,6 +7,7 @@ const {
   SdkError,
   TransportError,
   createIssueAttributesFromError,
+  createLogBrewSession,
   installBrowserBreadcrumbs
 } = require("@logbrew/sdk");
 const { transportResponse } = require("./rate-limit-response.cjs");
@@ -41,7 +42,7 @@ const {
   installLogBrewBrowserResourceTimingInstrumentation
 } = require("./resource-timing.cjs");
 const {
-  browserTraceMetadata,
+  browserTraceTelemetryContext,
   createAutomaticBrowserEventId,
   createBrowserTraceContext,
   createBrowserTraceparent,
@@ -62,7 +63,8 @@ const {
 const DEFAULT_SDK_NAME = "logbrew-browser";
 const CLIENT_REPORT_STORE = Symbol.for("@logbrew/sdk.clientReportStore");
 const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
-const DEFAULT_SDK_VERSION = "0.1.24";
+const CONTEXT_SCHEMA_VERSION = 1;
+const DEFAULT_SDK_VERSION = "0.1.25";
 const DEFAULT_ENDPOINT = "https://api.logbrew.co/v1/events";
 const DEFAULT_MAX_KEEPALIVE_BODY_BYTES = 64 * 1024;
 const MAX_PRODUCT_ANALYTICS_SURFACE_LENGTH = 256;
@@ -121,7 +123,7 @@ function createLogBrewBrowserClient({
     sdkName,
     sdkVersion,
     [CLIENT_REPORT_STORE]: clientReportStore,
-    [CONTEXT_PROVIDER]: clientContext?.subject === undefined ? contextProvider : undefined
+    [CONTEXT_PROVIDER]: contextProvider
   });
 }
 
@@ -178,6 +180,11 @@ function installLogBrewBrowser(options = {}) {
     throw new SdkError("configuration_error", "anonymousSubject needs the client that installLogBrewBrowser creates");
   }
   const anonymousSubject = options.client ? undefined : createAnonymousSubject(browserWindow, options.anonymousSubject);
+  // A session the app sets in its own context wins.
+  const session = options.session === false || options.context?.session !== undefined
+    ? undefined
+    : createLogBrewSession({ storage: sessionStorageOf(browserWindow) });
+  const subjectProvider = options.context?.subject === undefined ? anonymousSubject?.provider : undefined;
 
   const client = options.client ?? createLogBrewBrowserClient({
     ...options,
@@ -188,7 +195,8 @@ function installLogBrewBrowser(options = {}) {
     [CLIENT_REPORT_STORE]: options.persistOffline
       ? createBrowserClientReportStore(sessionStorageOf(browserWindow), options.persistOffline.storageKey)
       : undefined,
-    [CONTEXT_PROVIDER]: anonymousSubject?.provider
+    // Runs only for events captured after the context below exists.
+    [CONTEXT_PROVIDER]: () => browserEventContext(context.traceContext, session, subjectProvider)
   });
   const transport = createBrowserTransport(options, browserWindow);
   const traceContext = resolveBrowserTraceContext(options);
@@ -512,13 +520,7 @@ function createBrowserActionEvent(action, browserWindow = defaultWindow(), {
     path,
     source: "browser.action"
   });
-  const sanitizedMetadata = sanitizeMetadata(
-    mergeMetadata(
-      mergeMetadata(mergeMetadata(baseMetadata, metadata), details.metadata),
-      browserTraceMetadata(browserTraceContext)
-    ),
-    "action"
-  );
+  const sanitizedMetadata = sanitizeMetadata(mergeMetadata(mergeMetadata(baseMetadata, metadata), details.metadata), "action");
   const safeMetadata = mergeMetadata(
     sanitizedMetadata,
     productAnalyticsMetadata("interaction", details.metadata?.routeTemplate || path)
@@ -527,6 +529,7 @@ function createBrowserActionEvent(action, browserWindow = defaultWindow(), {
     id: idFactory({ action, browserWindow, message: details.name, path, source: "action" }),
     timestamp: now(),
     attributes: {
+      ...traceContextAttribute(browserTraceContext),
       metadata: safeMetadata,
       name: details.name,
       status: details.status
@@ -563,16 +566,14 @@ function createBrowserNetworkEvent(request, browserWindow = defaultWindow(), {
     traceId: details.traceId
   });
   const safeMetadata = sanitizeMetadata(
-    mergeMetadata(
-      mergeMetadata(mergeMetadata(mergeMetadata(baseMetadata, metadata), networkMetadata), details.metadata),
-      browserTraceMetadata(browserTraceContext, { traceId: details.traceId })
-    ),
+    mergeMetadata(mergeMetadata(mergeMetadata(baseMetadata, metadata), networkMetadata), details.metadata),
     "network"
   );
   return {
     id: idFactory({ browserWindow, message: details.name, path, request, source: "network" }),
     timestamp: now(),
     attributes: {
+      ...traceContextAttribute(browserTraceContext),
       metadata: safeMetadata,
       name: details.name,
       status: details.status
@@ -632,8 +633,7 @@ function createBrowserIssueEvent(input, browserWindow, {
     service,
     source,
     handled: false,
-    mechanism: source,
-    traceContext: browserTraceContext
+    mechanism: source
   });
   const safeMetadata = sanitizeMetadata(
     sanitizeBrowserIssueMetadata(attributes.metadata),
@@ -646,6 +646,7 @@ function createBrowserIssueEvent(input, browserWindow, {
     timestamp: now(),
     attributes: {
       ...attributes,
+      ...traceContextAttribute(browserTraceContext),
       title: `${summary.title}: ${attributes.exception.type}`,
       ...(exceptionChain ? { exceptionChain } : {}),
       ...(stackFrames ? { stackFrames } : {}),
@@ -1020,8 +1021,7 @@ function browserIssueAttributes(candidate, message, {
   release,
   runtime,
   service,
-  source,
-  traceContext
+  source
 }) {
   return createIssueAttributesFromError(candidate, {
     debugIdMap,
@@ -1037,13 +1037,22 @@ function browserIssueAttributes(candidate, message, {
     release,
     runtime,
     service,
-    source,
-    trace: traceContext ? {
-      sampled: traceContext.sampled,
-      spanId: traceContext.spanId,
-      traceId: traceContext.traceId
-    } : undefined
+    source
   });
+}
+
+function traceContextAttribute(traceContext) {
+  const context = browserTraceTelemetryContext(traceContext);
+  return context === undefined ? {} : { context };
+}
+
+function browserEventContext(traceContext, session, subjectProvider) {
+  const eventContext = {
+    ...subjectProvider?.(),
+    ...browserTraceTelemetryContext(traceContext),
+    ...(session === undefined ? {} : { session: { id: session.id() } })
+  };
+  return Object.keys(eventContext).length === 0 ? undefined : { ...eventContext, schemaVersion: CONTEXT_SCHEMA_VERSION };
 }
 
 function sanitizeBrowserIssueMetadata(metadata) {
@@ -1399,6 +1408,7 @@ module.exports = {
   createBrowserResourceTimingEvent,
   createBrowserWebVitalEvent,
   createBrowserXhrSpanEvent,
+  createAutomaticBrowserEventId,
   createBeaconTransport,
   createFetchTransport,
   createLogBrewBrowserFetch,
@@ -1433,6 +1443,7 @@ module.exports = {
     createBrowserResourceTimingEvent,
     createBrowserWebVitalEvent,
     createBrowserXhrSpanEvent,
+    createAutomaticBrowserEventId,
     createBeaconTransport,
     createFetchTransport,
     createLogBrewBrowserFetch,

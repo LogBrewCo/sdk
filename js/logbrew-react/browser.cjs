@@ -1,6 +1,7 @@
 const React = require("react");
 const {
   createLogBrewBrowserContext,
+  installLogBrewBrowserFetchInstrumentation,
   installLogBrewBrowserInteractionTimingInstrumentation,
   installLogBrewBrowserWebVitalsInstrumentation
 } = require("@logbrew/browser");
@@ -44,6 +45,14 @@ function useLogBrewBrowserInstrumentation(options = {}) {
       context,
       options,
       installLogBrewBrowserWebVitalsInstrumentation
+    );
+    installOptionalInstrumentation(
+      installed,
+      "fetch",
+      options.fetch ?? false,
+      context,
+      options,
+      installLogBrewBrowserFetchInstrumentation
     );
 
     return () => {

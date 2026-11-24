@@ -91,8 +91,12 @@ test("installed browser fetch wrapper emits a sanitized child span and scoped tr
     assert.equal(fetchCalls[0].init.headers.traceparent, `00-${TRACE_ID}-${FETCH_SPAN_ID}-01`);
 
     const payload = JSON.parse(context.previewJson());
-    assert.equal(payload.events.length, 1);
-    const [event] = payload.events;
+    assert.deepEqual(payload.events.map(({ type }) => type), ["span", "metric"]);
+    const [event, metric] = payload.events;
+    assert.deepEqual(
+      [metric.attributes.name, metric.attributes.value, metric.attributes.unit],
+      ["http.client.duration", event.attributes.durationMs, "ms"]
+    );
     assert.equal(event.type, "span");
     assert.equal(event.attributes.name, "browser.fetch POST /api/orders/:id");
     assert.equal(event.attributes.traceId, TRACE_ID);
@@ -415,7 +419,7 @@ for (const entry of ["index.js", "index.cjs"]) {
 function createCaptureContext(span, flush = async () => ({ statusCode: 202 })) {
   return {
     browserWindow: createFakeBrowserWindow("https://app.example.test/checkout"),
-    client: { flush, span },
+    client: { flush, metric() {}, span },
     traceContext: { traceId: TRACE_ID, spanId: PARENT_SPAN_ID },
     transport: {}
   };

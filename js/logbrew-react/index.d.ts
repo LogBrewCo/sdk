@@ -25,6 +25,11 @@ export type CreateLogBrewReactClientConfig = {
   eventFilter?: EventFilter;
   maxQueueSize?: number;
   onEventDropped?: (drop: DroppedEvent) => void;
+  /**
+   * Adds `context.session.id` to every event. The session lives in the tab's sessionStorage.
+   * It ends after 30 minutes without events or 4 hours after it starts. `false` sends no session ID. A `session` in `context` replaces it.
+   */
+  session?: boolean;
 };
 
 export type TracePropagationTarget = string | RegExp | ((url: string) => boolean);

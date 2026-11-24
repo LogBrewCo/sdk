@@ -22,6 +22,7 @@ import {
 } from "./trace-context.js";
 import { isList, isRecord, readField, stringOrUndefined } from "./values.js";
 import { SdkError } from "@logbrew/sdk";
+import { recordTimingMetric } from "./timing-metrics.js";
 
 /**
  * @import { SpanAttributes, TransportResponse } from "@logbrew/sdk"
@@ -255,6 +256,13 @@ async function captureBrowserWebVital(metric, context, options = {}) {
   const event = createBrowserWebVitalEvent(metric, context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
+  const { metricName, metricUnit, metricValue } = webVitalDetails(metric, options.webVitalPathTemplate);
+  recordTimingMetric(context.client, event, {
+    keys: ["vitalPath", "rating"],
+    name: `browser.web_vital.${metricName.toLowerCase()}`,
+    unit: metricUnit === "millisecond" ? "ms" : "1",
+    value: metricValue
+  });
   return flushAfterCapture(context, options);
 }
 

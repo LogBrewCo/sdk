@@ -24,6 +24,7 @@ const {
 } = require("./trace-context.cjs");
 const { isList, isRecord, readField, stringOrUndefined } = require("./values.cjs");
 const { SdkError } = require("@logbrew/sdk");
+const { recordTimingMetric } = require("./timing-metrics.cjs");
 
 /**
  * @import { SpanAttributes, TransportResponse } from "@logbrew/sdk"
@@ -257,6 +258,13 @@ async function captureBrowserWebVital(metric, context, options = {}) {
   const event = createBrowserWebVitalEvent(metric, context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
+  const { metricName, metricUnit, metricValue } = webVitalDetails(metric, options.webVitalPathTemplate);
+  recordTimingMetric(context.client, event, {
+    keys: ["vitalPath", "rating"],
+    name: `browser.web_vital.${metricName.toLowerCase()}`,
+    unit: metricUnit === "millisecond" ? "ms" : "1",
+    value: metricValue
+  });
   return flushAfterCapture(context, options);
 }
 

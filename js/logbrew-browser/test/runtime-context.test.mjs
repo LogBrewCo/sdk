@@ -38,9 +38,9 @@ const acceptingTransport = {
   }
 };
 
-test("browser package requires a core that keeps drop counts in session storage", () => {
+test("browser package requires a core with the session helper", () => {
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  assert.equal(manifest.peerDependencies["@logbrew/sdk"], "^0.1.33");
+  assert.equal(manifest.peerDependencies["@logbrew/sdk"], "^0.1.48");
 });
 
 function lowEntropyNavigator() {

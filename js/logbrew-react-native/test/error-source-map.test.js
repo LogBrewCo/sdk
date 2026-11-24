@@ -57,9 +57,13 @@ test("React Native error events attach privacy-bounded release artifact metadata
     assert.equal(metadata.platform, "ios");
     assert.equal(metadata.appState, "active");
     assert.equal(metadata.screen, "Checkout");
-    assert.equal(metadata.traceId, trace.traceId);
-    assert.equal(metadata.spanId, trace.spanId);
-    assert.equal(metadata.parentSpanId, trace.parentSpanId);
+    assert.deepEqual(event.attributes.context.trace, {
+      traceId: trace.traceId,
+      spanId: trace.spanId,
+      parentSpanId: trace.parentSpanId,
+      sampled: true
+    });
+    assert.equal(metadata.traceId, undefined);
     assert.equal(metadata.errorName, "TypeError");
     assert.equal(metadata.errorValueType, "object");
     assert.equal(event.attributes.evidence.likelyRootCause, "The authorization retry budget was exhausted.");

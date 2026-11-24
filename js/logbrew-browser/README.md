@@ -92,6 +92,29 @@ The ID is stored on the visitor's device. You own the site, so you decide if the
 
 `anonymousSubject` works only when `installLogBrewBrowser()` creates the client. It throws a configuration error together with the `client` option.
 
+## Sessions
+
+`installLogBrewBrowser()` adds a session ID to every event as `context.session.id`. The ID is 32 random hexadecimal characters. It holds no data about the visitor.
+
+- The SDK keeps the session in the tab's `sessionStorage` under the key `logbrew:session`, so a reload in the same tab continues it. Each new tab starts a new session.
+- A session ends after 30 minutes without events, or 4 hours after it starts. The next event then starts a new session.
+- If `sessionStorage` is not available, the session stays in page memory and ends when the page closes.
+- Set `session: false` to send no session ID. A `session` that you set in `context` replaces the automatic one.
+
+The session works only when `installLogBrewBrowser()` creates the client. A client that you pass with the `client` option keeps its own context.
+
+## Timing Metrics
+
+Each request and page timing that the SDK sends as a span is also sent as a histogram metric, so dashboards can chart it without span queries:
+
+| Source | Metric name | Unit | Metadata |
+| --- | --- | --- | --- |
+| Fetch and XHR spans | `http.client.duration` | `ms` | `method`, `requestPath`, `statusCode` |
+| Document load timing | `browser.page_load.duration` | `ms` | `documentPath`, `navigationType` |
+| Web Vitals | `browser.web_vital.<name>`, for example `browser.web_vital.lcp` | `ms`, or `1` for CLS | `vitalPath`, `rating` |
+
+The metric carries the same `context.trace` and `context.session` as its span.
+
 ## Read Events Back
 
 A successful send shows that LogBrew accepted the request. It does not show
@@ -595,7 +618,7 @@ await tracedFetch("/api/checkout", {
 });
 ```
 
-`installLogBrewBrowser()` creates a shared `traceContext` automatically and uses it for the initial page-view span, browser action metadata, browser error metadata, unhandled rejection metadata, and app-owned network milestone metadata. Pass `traceContext: logbrew.traceContext` to `createTraceparentFetch()` when the browser request should use the same trace as the page and product actions.
+`installLogBrewBrowser()` creates a shared `traceContext` automatically and uses it for the initial page-view span. Every other event from that client, such as an action, error, unhandled rejection, network milestone, log, or metric, carries the same trace in `context.trace` (`traceId`, `spanId`, and `sampled`). Pass `traceContext: logbrew.traceContext` to `createTraceparentFetch()` when the browser request should use the same trace as the page and product actions.
 
 If your app renews the active trace on SPA navigation, pass a provider so each request gets the current route trace:
 

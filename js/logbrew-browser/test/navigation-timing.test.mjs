@@ -69,8 +69,12 @@ test("installed browser navigation timing capture emits a sanitized document-loa
     });
 
     const payload = JSON.parse(context.previewJson());
-    assert.equal(payload.events.length, 1);
-    const [event] = payload.events;
+    assert.deepEqual(payload.events.map(({ type }) => type), ["span", "metric"]);
+    const [event, metric] = payload.events;
+    assert.deepEqual(
+      [metric.attributes.name, metric.attributes.value, metric.attributes.unit],
+      ["browser.page_load.duration", 384.123, "ms"]
+    );
     assert.equal(event.type, "span");
     assert.equal(event.attributes.name, "browser.document /products/:id");
     assert.equal(event.attributes.traceId, TRACE_ID);
@@ -159,8 +163,12 @@ test("installed browser navigation timing instrumentation waits for load and cap
     instrumentation.uninstall();
 
     const payload = JSON.parse(context.previewJson());
-    assert.equal(payload.events.length, 1);
-    const [event] = payload.events;
+    assert.deepEqual(payload.events.map(({ type }) => type), ["span", "metric"]);
+    const [event, metric] = payload.events;
+    assert.deepEqual(
+      [metric.attributes.name, metric.attributes.value, metric.attributes.unit],
+      ["browser.page_load.duration", event.attributes.durationMs, "ms"]
+    );
     assert.equal(event.attributes.name, "browser.document /profile/:id");
     assert.equal(event.attributes.metadata.documentPath, "/profile/:id");
     assert.equal(event.attributes.metadata.path, "/profile/123");

@@ -124,17 +124,17 @@ test("installed browser capture uses one explicit W3C trace context across page 
     assert.equal(pageView.attributes.metadata.analyticsSchemaVersion, 1);
     assert.equal(pageView.attributes.metadata.analyticsKind, "page_view");
     assert.equal(pageView.attributes.metadata.analyticsSurface, "/checkout/:step");
-    assert.equal(action.attributes.metadata.traceId, TRACE_ID);
-    assert.equal(action.attributes.metadata.spanId, SPAN_ID);
+    assert.equal(action.attributes.context.trace.traceId, TRACE_ID);
+    assert.equal(action.attributes.context.trace.spanId, SPAN_ID);
     assert.equal(action.attributes.metadata.nestedDropped, undefined);
     assert.equal(action.attributes.metadata.analyticsSchemaVersion, 1);
     assert.equal(action.attributes.metadata.analyticsKind, "interaction");
     assert.equal(action.attributes.metadata.analyticsSurface, "/checkout");
-    assert.equal(network.attributes.metadata.traceId, TRACE_ID);
-    assert.equal(network.attributes.metadata.spanId, SPAN_ID);
+    assert.equal(network.attributes.context.trace.traceId, TRACE_ID);
+    assert.equal(network.attributes.context.trace.spanId, SPAN_ID);
     assert.equal(network.attributes.metadata.routeTemplate, "/api/checkout");
-    assert.equal(issue.attributes.metadata.traceId, TRACE_ID);
-    assert.equal(issue.attributes.metadata.spanId, SPAN_ID);
+    assert.equal(issue.attributes.context.trace.traceId, TRACE_ID);
+    assert.equal(issue.attributes.context.trace.spanId, SPAN_ID);
     assert.deepEqual(
       issue.attributes.breadcrumbs.map(({ category, type, level }) => ({ category, type, level })),
       [
@@ -240,8 +240,8 @@ test("installed browser errors attach release artifact Debug ID metadata without
     assert.equal(issue.attributes.metadata.environment, "production");
     assert.equal(issue.attributes.metadata.service, "checkout-web");
     assert.equal(issue.attributes.metadata.runtime, "browser");
-    assert.equal(issue.attributes.metadata.traceId, TRACE_ID);
-    assert.equal(issue.attributes.metadata.spanId, SPAN_ID);
+    assert.equal(issue.attributes.context.trace.traceId, TRACE_ID);
+    assert.equal(issue.attributes.context.trace.spanId, SPAN_ID);
     assert.equal(issue.attributes.metadata.releaseArtifactType, "sourcemap");
     assert.equal(issue.attributes.metadata.releaseArtifactCodeFile, "/assets/app.js");
     assert.equal(issue.attributes.metadata.releaseArtifactDebugId, "11111111-2222-4333-8444-555555555555");
@@ -675,8 +675,8 @@ test("installed browser navigation instrumentation renews trace context for SPA 
     assert.equal(spans[2].attributes.traceId, POP_TRACE_ID);
     assert.equal(spans[2].attributes.spanId, POP_SPAN_ID);
     assert.equal(action.attributes.metadata.path, "/account");
-    assert.equal(action.attributes.metadata.traceId, NAV_TRACE_ID);
-    assert.equal(action.attributes.metadata.spanId, NAV_SPAN_ID);
+    assert.equal(action.attributes.context.trace.traceId, NAV_TRACE_ID);
+    assert.equal(action.attributes.context.trace.spanId, NAV_SPAN_ID);
     assert.equal(action.attributes.metadata.nestedDropped, undefined);
     assert.equal(context.traceContext.traceId, POP_TRACE_ID);
     assert.equal(context.traceContext.spanId, POP_SPAN_ID);

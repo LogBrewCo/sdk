@@ -1,7 +1,7 @@
 import { LogBrewClient, SdkError, createIssueAttributesFromError } from "@logbrew/sdk";
+import { createAutomaticBrowserEventId, createFetchTransport } from "@logbrew/browser";
 import { createRandomTraceparent, createTracedFetch, shouldPropagateTraceparent as shouldPropagate } from "./trace-fetch.js";
 import { findBrowserWindow, startBrowserCapture } from "./browser-capture.js";
-import { createFetchTransport } from "@logbrew/browser";
 import { inject } from "vue";
 
 /**
@@ -27,7 +27,7 @@ import { inject } from "vue";
  */
 
 const DEFAULT_SDK_NAME = "logbrew-vue";
-const DEFAULT_SDK_VERSION = "0.1.3";
+const DEFAULT_SDK_VERSION = "0.1.4";
 const DEFAULT_MAX_RETRIES = 2;
 
 /** @type {InjectionKey<LogBrewVueContext>} */
@@ -57,17 +57,6 @@ function readEnv(name) {
  */
 function isFunction(value) {
   return typeof value === "function";
-}
-
-/**
- * @param {string} value
- * @returns {string}
- */
-function slugify(value) {
-  return value
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/gu, "_")
-    .replaceAll(/^_+|_+$/gu, "") || "event";
 }
 
 /**
@@ -175,7 +164,7 @@ function getComponentName(instance) {
  * @returns {string}
  */
 function defaultViewEventId(name, path) {
-  return `evt_vue_view_${slugify(`${name}_${path}`)}`;
+  return createAutomaticBrowserEventId("evt_vue_view", `${name}_${path}`);
 }
 
 /**
@@ -185,7 +174,7 @@ function defaultViewEventId(name, path) {
  * @returns {string}
  */
 function defaultErrorEventId(error, instance, info) {
-  return `evt_vue_error_${slugify(`${getComponentName(instance)}_${info}_${errorMessage(error)}`)}`;
+  return createAutomaticBrowserEventId("evt_vue_error", `${getComponentName(instance)}_${info}_${errorMessage(error)}`);
 }
 
 /**

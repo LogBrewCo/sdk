@@ -69,8 +69,12 @@ test("installed browser Web Vital capture emits a sanitized trace-linked child s
     });
 
     const payload = JSON.parse(context.previewJson());
-    assert.equal(payload.events.length, 1);
-    const [event] = payload.events;
+    assert.deepEqual(payload.events.map(({ type }) => type), ["span", "metric"]);
+    const [event, metric] = payload.events;
+    assert.deepEqual(
+      [metric.attributes.name, metric.attributes.value, metric.attributes.unit],
+      ["browser.web_vital.lcp", 2480.456, "ms"]
+    );
     assert.equal(event.type, "span");
     assert.equal(event.attributes.name, "browser.web_vital LCP /products/:id");
     assert.equal(event.attributes.traceId, TRACE_ID);

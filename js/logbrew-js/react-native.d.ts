@@ -10,6 +10,7 @@ import type {
   createLogBrewOpenTelemetrySpanExporter,
   createLogBrewOpenTelemetrySpanProcessor,
   createLogBrewPinoDestination,
+  createLogBrewSession,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createSupportTicketDraft,
@@ -40,6 +41,7 @@ declare const sdk: {
   createLogBrewOpenTelemetrySpanExporter: typeof createLogBrewOpenTelemetrySpanExporter;
   createLogBrewOpenTelemetrySpanProcessor: typeof createLogBrewOpenTelemetrySpanProcessor;
   createLogBrewPinoDestination: typeof createLogBrewPinoDestination;
+  createLogBrewSession: typeof createLogBrewSession;
   createNetworkMilestoneAttributes: typeof createNetworkMilestoneAttributes;
   createProductActionAttributes: typeof createProductActionAttributes;
   createSupportTicketDraft: typeof createSupportTicketDraft;
@@ -140,6 +142,7 @@ export {
   createLogBrewOpenTelemetrySpanExporter,
   createLogBrewOpenTelemetrySpanProcessor,
   createLogBrewPinoDestination,
+  createLogBrewSession,
   createNetworkMilestoneAttributes,
   createProductActionAttributes,
   createSupportTicketDraft,

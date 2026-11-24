@@ -279,6 +279,22 @@ function getReactNativeTraceMetadata(trace = getActiveLogBrewTrace()) {
 }
 
 /**
+ * @param {unknown} [trace]
+ * @returns {{ schemaVersion: 1, trace: { traceId: string, spanId: string, parentSpanId?: string, sampled: boolean } } | undefined}
+ */
+function getReactNativeTraceTelemetryContext(trace = getActiveLogBrewTrace()) {
+  const context = resolveTraceContext(trace);
+  if (!context) {
+    return undefined;
+  }
+  const { parentSpanId, sampled, spanId, traceId } = context;
+  return {
+    schemaVersion: 1,
+    trace: { traceId, spanId, ...(parentSpanId === undefined ? {} : { parentSpanId }), sampled }
+  };
+}
+
+/**
  * @param {SpanAttributesInput} [input]
  * @returns {Record<string, unknown>}
  */
@@ -330,6 +346,7 @@ module.exports = {
   createReactNativeTraceparent,
   getActiveLogBrewTrace,
   getReactNativeTraceMetadata,
+  getReactNativeTraceTelemetryContext,
   resolveTraceContext,
   withLogBrewTrace
 };

@@ -38,10 +38,11 @@ export type {
   IssueLikelyFixArea,
   IssueStackFrame,
   JavaScriptErrorIssueOptions,
+  LogBrewSessionOptions,
   NativeStackArchitecture,
   NativeStackFrame
 } from "./types/issues.js";
-export { createIssueAttributesFromError, installBrowserBreadcrumbs } from "./types/issues.js";
+export { createIssueAttributesFromError, createLogBrewSession, installBrowserBreadcrumbs } from "./types/issues.js";
 export type {
   ConsoleCaptureConfig,
   ConsoleCaptureHandle,

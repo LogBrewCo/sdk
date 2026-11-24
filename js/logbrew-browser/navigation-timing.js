@@ -23,6 +23,7 @@ import {
   resolveTraceContext
 } from "./trace-context.js";
 import { SdkError } from "@logbrew/sdk";
+import { recordTimingMetric } from "./timing-metrics.js";
 
 /**
  * @import { SpanAttributes, TransportResponse } from "@logbrew/sdk"
@@ -283,6 +284,12 @@ async function captureBrowserNavigationTiming(entry, context, options = {}) {
   const event = createBrowserNavigationTimingEvent(entry, context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
+  recordTimingMetric(context.client, event, {
+    keys: ["documentPath", "navigationType"],
+    name: "browser.page_load.duration",
+    unit: "ms",
+    value: event.attributes.durationMs
+  });
   return flushAfterCapture(context, options);
 }
 

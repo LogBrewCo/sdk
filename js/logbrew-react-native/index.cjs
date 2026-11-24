@@ -1,4 +1,4 @@
-const { LogBrewClient, SdkError } = require("@logbrew/sdk");
+const { LogBrewClient, SdkError, createLogBrewSession } = require("@logbrew/sdk");
 const { createReactNativeErrorEvent, captureReactNativeError } = require("./index-errors.cjs");
 const {
   captureAppStateChange,
@@ -26,6 +26,7 @@ const {
   createReactNativeTraceparent,
   getActiveLogBrewTrace,
   getReactNativeTraceMetadata,
+  getReactNativeTraceTelemetryContext,
   withLogBrewTrace
 } = require("./index-trace.cjs");
 const { createReactNativeFetchTransport } = require("./index-transport.cjs");
@@ -36,7 +37,8 @@ const { getReactNativeContext } = require("./index-values.cjs");
  */
 
 const DEFAULT_SDK_NAME = "logbrew-react-native";
-const DEFAULT_SDK_VERSION = "0.1.48";
+const DEFAULT_SDK_VERSION = "0.1.49";
+const CONTEXT_PROVIDER = Symbol.for("@logbrew/sdk.contextProvider");
 const DEFAULT_REACT_NATIVE_DELIVERY_INTERVAL_MS = 1000;
 const DEFAULT_MAX_RETRIES = 2;
 
@@ -46,6 +48,20 @@ const DEFAULT_MAX_RETRIES = 2;
  */
 function isPresentKey(key) {
   return key !== undefined && Boolean(key);
+}
+
+/**
+ * Adds the active trace and the app session to every event.
+ *
+ * @param {{ id: () => string } | undefined} session
+ * @returns {Record<string, unknown> | undefined}
+ */
+function reactNativeEventContext(session) {
+  const traceContext = getReactNativeTraceTelemetryContext();
+  if (session === undefined) {
+    return traceContext;
+  }
+  return { ...traceContext, schemaVersion: 1, session: { id: session.id() } };
 }
 
 /**
@@ -65,6 +81,7 @@ function createLogBrewReactNativeClient({
   maxQueueBytes,
   maxQueueSize,
   onEventDropped,
+  session,
   sdkName = DEFAULT_SDK_NAME,
   sdkVersion = DEFAULT_SDK_VERSION,
   maxRetries = DEFAULT_MAX_RETRIES,
@@ -74,8 +91,11 @@ function createLogBrewReactNativeClient({
   if (!isPresentKey(authKey)) {
     throw new SdkError("configuration_error", "createLogBrewReactNativeClient requires clientKey or apiKey");
   }
+  // A session the app sets in its own context wins.
+  const appSession = session === false || context?.session !== undefined ? undefined : createLogBrewSession();
   return LogBrewClient.create({
     apiKey: authKey,
+    [CONTEXT_PROVIDER]: () => reactNativeEventContext(appSession),
     deliveryIntervalMs: deliveryIntervalMs ?? DEFAULT_REACT_NATIVE_DELIVERY_INTERVAL_MS,
     maxRetries,
     sdkName,

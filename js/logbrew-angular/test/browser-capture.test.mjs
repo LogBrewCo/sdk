@@ -140,7 +140,7 @@ function deliveryFetch(recordBody) {
 async function failTwice(handler, bodies) {
   handler.handleError(new Error("payment declined"));
   await waitFor(() => deliveredEvents(bodies, "issue").length === ONE);
-  handler.handleError(new Error("payment declined again"));
+  handler.handleError(new Error("payment declined"));
   await waitFor(() => deliveredEvents(bodies, "issue").length === TWO);
 }
 
@@ -191,7 +191,12 @@ function assertRequestSpan(capture, issue) {
   const fetchSpan = deliveredEvents(capture.bodies, "span").find((span) => readPath(span, ["attributes", "name"]) === "browser.fetch GET /cart");
   assert.notEqual(fetchSpan, undefined, "app request becomes a span");
   const traceId = readPath(fetchSpan, ["attributes", "traceId"]);
-  assert.equal(readPath(issue, ["attributes", "metadata", "traceId"]), traceId, "issue and span share the page trace");
+  assert.equal(readPath(issue, ["attributes", "context", "trace", "traceId"]), traceId, "issue and span share the page trace");
+  const [first, second] = deliveredEvents(capture.bodies, "issue");
+  assert.notEqual(readPath(first, ["id"]), readPath(second, ["id"]), "2 identical errors keep different event IDs");
+  const sessionId = readPath(first, ["attributes", "context", "session", "id"]);
+  assert.match(String(sessionId), /^[0-9a-f]{32}$/u);
+  assert.equal(readPath(fetchSpan, ["attributes", "context", "session", "id"]), sessionId, "every event shares the session");
   assert.match(String(readPath(capture.appRequests[FIRST], ["headers", "traceparent"])), new RegExp(`^00-${String(traceId)}-`, "u"));
 }
 

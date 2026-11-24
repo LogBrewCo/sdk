@@ -6,7 +6,7 @@ const {
   sanitizeReactNativeIssueStackFrames
 } = require("./metadata.cjs");
 const { defaultEventId } = require("./index-random.cjs");
-const { getActiveLogBrewTrace, resolveTraceContext } = require("./index-trace.cjs");
+const { getActiveLogBrewTrace, getReactNativeTraceTelemetryContext } = require("./index-trace.cjs");
 const { compactMetadata, getReactNativeContext, readField, requireClient, textOf } = require("./index-values.cjs");
 
 /**
@@ -120,7 +120,7 @@ function createReactNativeErrorEvent(error, {
   platform, appState, release, runtime, screen, service, timestamp, trace
 } = {}) {
   const details = errorDetails(error);
-  const traceContext = resolveTraceContext(trace ?? getActiveLogBrewTrace());
+  const traceContext = getReactNativeTraceTelemetryContext(trace ?? getActiveLogBrewTrace());
   const attributes = createIssueAttributes(errorCandidate(error), {
     debugIdMap: debugIdMap === undefined ? runtimeReactNativeDebugIdMap() : debugIdMap,
     evidence,
@@ -140,14 +140,16 @@ function createReactNativeErrorEvent(error, {
     release,
     runtime,
     service,
-    source: "react-native.error",
-    trace: traceContext
+    source: "react-native.error"
   });
   return {
     id: id ?? idFactory({ error, message: details.message, screen }),
     timestamp: timestamp ?? now(),
 
-    attributes: reactNativeIssueAttributes(attributes, details.message)
+    attributes: {
+      ...reactNativeIssueAttributes(attributes, details.message),
+      ...(traceContext === undefined ? {} : { context: traceContext })
+    }
   };
 }
 

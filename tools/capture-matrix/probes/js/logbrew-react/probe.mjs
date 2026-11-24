@@ -1,6 +1,17 @@
+import http from "node:http";
 import { Window } from "happy-dom";
 
-const browserWindow = new Window({ url: "https://shop.example.test/checkout/cart-1" });
+const api = http.createServer((request, response) => {
+  response.writeHead(request.method === "OPTIONS" ? 204 : 200, {
+    "access-control-allow-origin": "*",
+    "content-type": "application/json"
+  });
+  response.end("{}");
+});
+await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
+const origin = `http://127.0.0.1:${api.address().port}`;
+
+const browserWindow = new Window({ url: `${origin}/checkout/cart-1` });
 for (const name of ["window", "document", "navigator", "HTMLElement", "Node", "Event", "MouseEvent"]) {
   Object.defineProperty(globalThis, name, { configurable: true, value: name === "window" ? browserWindow : browserWindow[name] });
 }
@@ -17,6 +28,7 @@ const {
   createLogBrewReactRootOptions,
   createLogBrewReactRouterNavigationObserver
 } = await import("@logbrew/react");
+const { useLogBrewBrowserInstrumentation } = await import("@logbrew/react/browser");
 
 const h = React.createElement;
 const client = createLogBrewReactClient({
@@ -34,9 +46,15 @@ const transport = createFetchTransport({ endpoint: process.env.LOGBREW_CAPTURE_E
 const consoleCapture = installLogBrewConsoleCapture({ client, console, transport, levels: ["info", "warn"], logger: "console" });
 
 let goTo;
+let cartLoaded;
+const browserTiming = { fetch: true, interactionTiming: false };
 function Checkout() {
   goTo = useNavigate();
-  React.useEffect(() => console.info("checkout started"), []);
+  useLogBrewBrowserInstrumentation(browserTiming);
+  React.useEffect(() => {
+    console.info("checkout started");
+    cartLoaded = window.fetch(`${origin}/api/cart`).then((response) => response.text());
+  }, []);
   return h("p", null, "Checkout");
 }
 function Payment() {
@@ -65,9 +83,11 @@ const root = createRoot(container, createLogBrewReactRootOptions(client));
 const settle = () => new Promise((resolve) => setTimeout(resolve, 100));
 root.render(app);
 await settle();
+await cartLoaded;
 goTo("/payment/cart-2");
 await settle();
 root.unmount();
 consoleCapture.uninstall();
 await client.shutdown(transport);
 await browserWindow.happyDOM.close();
+api.close();

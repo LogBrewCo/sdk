@@ -729,6 +729,12 @@ Screen views carry the versioned `screen_view` analytics classification, and exp
 
 The package ships a `react-native` entry that binds platform state and linked native services for Metro, while the default server entry accepts runtime dependencies explicitly. That keeps mobile setup explicit without treating a server process as a native runtime.
 
+## Sessions And Trace Context
+
+`createLogBrewReactNativeClient()` adds a session ID to every event as `context.session.id`. The ID is 32 random hexadecimal characters and stays in memory while the app runs. A session ends after 30 minutes without events, or 4 hours after it starts; the next event then starts a new session. A cold start always starts a new session. Set `session: false` to send no session ID. A `session` that you set in `context` replaces the automatic one.
+
+While a trace is active (see `withLogBrewTrace()` below), every event from the client carries it in `context.trace`, and `captureReactNativeError()` puts the trace that you pass in `context.trace` of the issue.
+
 ## Trace Propagation
 
 Use an active trace when one product operation should connect screen views, logs, handled errors, actions, network milestones, explicit spans, and outbound request headers. `createReactNativeTraceContext()` continues a valid W3C `traceparent` with a fresh local span ID and falls back to a local root when the incoming value is missing or malformed.

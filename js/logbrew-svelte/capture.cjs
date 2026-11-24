@@ -1,5 +1,6 @@
 "use strict";
 
+const { createAutomaticBrowserEventId } = require("@logbrew/browser");
 const { createIssueAttributesFromError } = require("@logbrew/sdk");
 
 /**
@@ -29,17 +30,6 @@ function readField(value, key) {
  */
 function isFunction(value) {
   return typeof value === "function";
-}
-
-/**
- * @param {string} value
- * @returns {string}
- */
-function slugify(value) {
-  return value
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/gu, "_")
-    .replaceAll(/^_+|_+$/gu, "") || "event";
 }
 
 /**
@@ -74,7 +64,20 @@ function isLogBrewSvelteContext(value) {
  */
 function defaultErrorEventId(error, context) {
   const message = error instanceof Error ? error.message : String(error);
-  return `evt_svelte_error_${slugify(`${context.component}_${context.info}_${message}`)}`;
+  return createAutomaticBrowserEventId("evt_svelte_error", `${context.component}_${context.info}_${message}`);
+}
+
+/**
+ * @param {Readonly<NonNullable<LogBrewSvelteErrorOptions["trace"]>>} trace
+ * @returns {NonNullable<LogBrewSvelteErrorOptions["trace"]>}
+ */
+function traceFields({ parentSpanId, sampled, spanId, traceId }) {
+  return {
+    spanId,
+    traceId,
+    ...(parentSpanId === undefined ? {} : { parentSpanId }),
+    ...(sampled === undefined ? {} : { sampled })
+  };
 }
 
 /**
@@ -93,22 +96,25 @@ function createSvelteErrorEvent(error, options = {}) {
     now: timestamp = currentTime,
     source = "svelte.error",
     title,
+    trace,
     ...issueOptions
   } = options;
+  const attributes = createIssueAttributesFromError(error, {
+    ...issueOptions,
+    handled,
+    mechanism,
+    metadata: { ...metadata, component, info },
+    source,
+    title: title ?? (component ? `${component} failed` : "Svelte component failed")
+  });
   return {
     id: idFactory(error, { component, info }),
     timestamp: timestamp(),
 
-    attributes: createIssueAttributesFromError(error, {
-      ...issueOptions,
-      handled,
-      mechanism,
-      metadata: { ...metadata, component, info },
-      source,
-      title: title ?? (component ? `${component} failed` : "Svelte component failed")
-    })
+    attributes: trace ? { ...attributes, context: { schemaVersion: 1, trace: traceFields(trace) } } : attributes
   };
 }
+
 
 /**
  * @param {LogBrewSvelteCaptureOptions} options
@@ -166,6 +172,5 @@ module.exports = {
   isLogBrewSvelteContext,
   notifyFailure,
   now,
-  readField,
-  slugify
+  readField
 };

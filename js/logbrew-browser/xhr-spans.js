@@ -25,6 +25,7 @@ import {
 import { SdkError } from "@logbrew/sdk";
 import { createBrowserFetchSpanEvent } from "./fetch-spans.js";
 import { shouldPropagateTraceparent } from "./traceparent-fetch.js";
+import { REQUEST_METRIC_KEYS, recordTimingMetric } from "./timing-metrics.js";
 
 /**
  * @import { Metadata, SpanAttributes, TransportResponse } from "@logbrew/sdk"
@@ -137,6 +138,12 @@ async function captureBrowserXhrSpan(request, context, options = {}) {
   const event = createBrowserXhrSpanEvent(request, context.browserWindow, eventOptions);
 
   context.client.span(event.id, event.timestamp, event.attributes);
+  recordTimingMetric(context.client, event, {
+    keys: REQUEST_METRIC_KEYS,
+    name: "http.client.duration",
+    unit: "ms",
+    value: event.attributes.durationMs
+  });
   return flushAfterCapture(context, options);
 }
 

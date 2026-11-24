@@ -11,12 +11,16 @@ const api = http.createServer((request, response) => {
 });
 await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
 const origin = `http://127.0.0.1:${api.address().port}`;
-const browserWindow = new Window({ url: "https://shop.example.test/checkout" });
+const browserWindow = new Window({ url: `${origin}/checkout` });
 browserWindow.document.body.innerHTML = "<app-root></app-root>";
 const globals = ["window", "document", "navigator", "Element", "HTMLElement", "Node", "Text", "Comment", "Event", "MouseEvent", "KeyboardEvent", "XMLHttpRequest"];
 for (const name of globals) {
   Object.defineProperty(globalThis, name, { configurable: true, value: name === "window" ? browserWindow : browserWindow[name] });
 }
+// In a browser, globalThis.fetch is window.fetch, which Angular's default fetch backend calls.
+// The local collector sends no CORS headers, so delivery keeps the Node fetch.
+const collectorFetch = globalThis.fetch;
+Object.defineProperty(globalThis, "fetch", { configurable: true, get: () => browserWindow.fetch });
 
 await import("@angular/compiler");
 const { Component, inject, provideZonelessChangeDetection } = await import("@angular/core");
@@ -60,6 +64,7 @@ const app = await bootstrapApplication(CheckoutComponent, {
     provideLogBrew({
       clientKey: "LOGBREW_CLIENT_KEY",
       endpoint: process.env.LOGBREW_CAPTURE_ENDPOINT,
+      fetchImpl: collectorFetch,
       context: {
         schemaVersion: 1,
         resource: {
