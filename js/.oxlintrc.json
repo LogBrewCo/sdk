@@ -992,7 +992,16 @@
         "logbrew-express/test/support.js"
       ],
       "rules": {
+        "promise/prefer-catch": "off",
         "unicorn/no-thenable": "off"
+      }
+    },
+    {
+      "files": [
+        "logbrew-express/index.cjs"
+      ],
+      "rules": {
+        "promise/prefer-catch": "off"
       }
     },
     {
