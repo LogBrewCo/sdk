@@ -96,7 +96,8 @@ cat > tsconfig.json <<'EOF'
     "moduleResolution": "NodeNext",
     "noEmit": true,
     "strict": true,
-    "target": "ES2022"
+    "target": "ES2022",
+    "types": ["node"]
   },
   "include": ["types.ts"]
 }
