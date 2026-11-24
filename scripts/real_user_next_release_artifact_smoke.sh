@@ -101,6 +101,8 @@ browser_tgz="$pack_dir/$browser_tgz"
 cp "$sdk_tgz" "$tmp_dir/logbrew-sdk.tgz"
 cp "$next_tgz" "$tmp_dir/logbrew-next.tgz"
 cp "$browser_tgz" "$tmp_dir/logbrew-browser.tgz"
+node_tgz="$(cd "$repo_root/js/logbrew-node" && npm pack --loglevel=error --pack-destination "$pack_dir")"
+cp "$pack_dir/$node_tgz" "$tmp_dir/logbrew-node.tgz"
 
 port_file="$tmp_dir/fake-intake-port"
 state_file="$tmp_dir/fake-intake-state.json"
@@ -202,7 +204,7 @@ JS
 (
   cd "$app_dir"
   npm_ci_locked next-release-artifact --loglevel=error
-  npm_add_logbrew --loglevel=error ../logbrew-browser.tgz ../logbrew-sdk.tgz ../logbrew-next.tgz
+  npm_add_logbrew --loglevel=error ../logbrew-browser.tgz ../logbrew-sdk.tgz ../logbrew-next.tgz ../logbrew-node.tgz
   node --input-type=module - <<'JS'
 import { withLogBrewNextReleaseArtifacts } from "@logbrew/next/release-artifacts";
 
