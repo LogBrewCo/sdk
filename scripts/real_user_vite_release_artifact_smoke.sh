@@ -333,8 +333,11 @@ assert metadata["release"] == "2026.06.18-vite"
 assert metadata["environment"] == "production"
 assert metadata["service"] == "checkout-web"
 assert metadata["runtime"] == "browser"
-assert metadata["traceId"] == "00112233445566778899aabbccddeeff"
-assert metadata["spanId"] == "2222333344445555"
+trace_context = sdk_issue_event["attributes"]["context"]["trace"]
+assert trace_context["traceId"] == "00112233445566778899aabbccddeeff"
+assert trace_context["spanId"] == "2222333344445555"
+assert trace_context["sampled"] is True
+assert "traceId" not in metadata
 assert sdk_issue_symbolication["input"]["type"] == "sdk_issue_event"
 assert sdk_issue_symbolication["input"]["issueId"] == "evt_vite_sdk_issue_001"
 assert sdk_issue_symbolication["status"] == "resolved"
