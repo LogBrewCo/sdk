@@ -9,7 +9,7 @@
 #                                         publish each listed npm version whose
 #                                         package has a jsr.json
 #
-# publish runs in GitHub Actions: the job's OIDC token signs in, and JSR adds
+# publish runs in GitHub Actions: the job signs in through GitHub OIDC, and JSR adds
 # provenance and skips a version it already has.
 set -euo pipefail
 
