@@ -439,6 +439,22 @@ findings = "seeded: a code change and a peer range change without a new version 
 replaces = "none"
 checked = 2026-11-25
 
+
+[[tool]]
+id = "jsr-publish"
+risk = "a browser SDK release that reaches npm but not JSR, or a JSR package that fails to type-check for Deno users"
+tool = "scripts/jsr_publish.sh with the JSR CLI pinned in tools/jsr-publish/package.json"
+version = "repository"
+unpinned = "repository script, versioned by commit; the JSR CLI is pinned in tools/jsr-publish/bun.lock"
+commands = ["scripts/jsr_publish.sh"]
+runs_in = "CI Contract checks: jsr_publish.sh check dry-runs every package with a jsr.json (pull requests); Release npm Packages workflow: jsr_publish.sh publish after the npm job, signed in with the job's OIDC token"
+config = "each package's jsr.json: name, version from package.json, and the exported entry files"
+conflicts = "none known"
+exceptions = "none"
+runtime = "unmeasured; added 2026-11-25"
+findings = "2026-11-25: @logbrew/browser dry-runs with no slow-type warnings; @logbrew/sdk and @logbrew/node stay off JSR because their ESM entry files import CommonJS"
+replaces = "none"
+checked = 2026-11-25
 [[tool]]
 id = "osv-scanner"
 risk = "a security advisory published against a locked dependency after the change that locked it merged"
