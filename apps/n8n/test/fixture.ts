@@ -108,6 +108,20 @@ function notFound(error: string, next: string): Response {
   return json({ code: "not_found", error, next }, status.notFound);
 }
 
+function issuesAfter(search: string): readonly (typeof issues)[number][] {
+  const params = new URLSearchParams(search);
+  const since = Date.parse(params.get("since") ?? "");
+  const cursorTime = Date.parse(params.get("cursor_time") ?? "");
+  const cursorId = params.get("cursor_id") ?? "";
+  return issues
+    .filter((issue) => Number.isNaN(since) || Date.parse(issue.last_seen_at) >= since)
+    .toSorted((left, right) => Date.parse(right.last_seen_at) - Date.parse(left.last_seen_at))
+    .filter((issue) => {
+      const seen = Date.parse(issue.last_seen_at);
+      return Number.isNaN(cursorTime) || seen < cursorTime || (seen === cursorTime && issue.id < cursorId);
+    });
+}
+
 function listIssues(search: string): Response {
   const params = new URLSearchParams(search);
   if (params.get("pagination") !== "cursor" || params.get("response_version") !== "7") {
@@ -116,16 +130,7 @@ function listIssues(search: string): Response {
       status.badRequest,
     );
   }
-  const since = Date.parse(params.get("since") ?? "");
-  const cursorTime = Date.parse(params.get("cursor_time") ?? "");
-  const cursorId = params.get("cursor_id") ?? "";
-  const listed = issues
-    .filter((issue) => Number.isNaN(since) || Date.parse(issue.last_seen_at) >= since)
-    .toSorted((left, right) => Date.parse(right.last_seen_at) - Date.parse(left.last_seen_at))
-    .filter((issue) => {
-      const seen = Date.parse(issue.last_seen_at);
-      return Number.isNaN(cursorTime) || seen < cursorTime || (seen === cursorTime && issue.id < cursorId);
-    });
+  const listed = issuesAfter(search);
   const page = listed.slice(firstRow, pageSize);
   const [last] = page.toReversed();
   const more = listed.length > page.length && last !== undefined;
