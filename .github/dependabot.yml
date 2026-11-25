@@ -68,6 +68,13 @@ updates:
     groups:
       bun:
         patterns: ["*"]
+    ignore:
+      # ray lint runs typescript-eslint through @raycast/eslint-config, which
+      # supports TypeScript before 6.1 and fails on TypeScript 7 with
+      # "typescript-eslint does not support TS 7.0". Remove this when
+      # typescript-eslint supports TypeScript 7.
+      - dependency-name: typescript
+        versions: [">= 6.1"]
   - package-ecosystem: bundler
     directories:
       - /ruby/logbrew-ruby
