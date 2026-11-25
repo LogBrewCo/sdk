@@ -519,7 +519,7 @@
       },
       "method": "Angular 22 standalone app bootstrapped with JIT and zoneless change detection under happy-dom, with provideLogBrew, which installs @logbrew/browser with its fetch transport, breadcrumbs, and request spans, its ErrorHandler, injectLogBrew, and console capture; one HttpClient call under tracePropagationTargets and a click handler that throws twice",
       "probe": "tools/capture-matrix/probes/js/logbrew-angular",
-      "inputs": "758909be83f015473a5cb21da8874c1f363bb88ca784ec206faeefe82dbb50e4"
+      "inputs": "20190e533de7fae1759818918a1ec8381afa8b90a5818b5647ee57ef7c3d8c7b"
     },
     "js/logbrew-aws-sqs": {
       "share": 100.0,
@@ -577,7 +577,7 @@
       },
       "method": "Browser page under happy-dom with installLogBrewBrowser and its fetch transport, the documented service, deployment, and subject context, fetch and SPA navigation instrumentation, and console capture; one API call that succeeds, one that fails, and a click handler that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-browser",
-      "inputs": "098ca6088afa29038ca9788328e7950bef2652743630c8866f9481202bc0c916"
+      "inputs": "0588f7ebb2553dd590de0f8eab65db5b9b4ef5ac8f115cda2714750ac6b0e996"
     },
     "js/logbrew-bullmq": {
       "share": 100.0,
@@ -885,7 +885,7 @@
       },
       "method": "React 19 app rendered with react-dom under happy-dom, with LogBrewProvider, the React 19 root error options, LogBrewErrorBoundary, the React Router route observer, the @logbrew/react/browser hook with fetch timing, console capture, and the @logbrew/browser fetch transport; one API call through window.fetch, one route that renders and one whose component throws during render",
       "probe": "tools/capture-matrix/probes/js/logbrew-react",
-      "inputs": "1b48784e0d8ee0ce6791275cd52a025db043d5faf933c85f36c1ae826a6828fd"
+      "inputs": "9a41d3db3cfc29de5d3dfbc2b784d5863ad414d4fc9d82c567699a3c1224cc03"
     },
     "js/logbrew-react-native": {
       "share": 100.0,
@@ -941,7 +941,7 @@
       },
       "method": "Svelte 5 component compiled with svelte/compiler and mounted under happy-dom, with installLogBrewBrowser and its fetch transport, setLogBrewContext, console capture, and captureSvelteError in a svelte:boundary handler around a render that throws; plus the SvelteKit handle and handleError hooks called with web Request events the way SvelteKit calls them, since a real SvelteKit server needs a Vite build",
       "probe": "tools/capture-matrix/probes/js/logbrew-svelte",
-      "inputs": "46a63d973b169c318ac45fe2d063e6c816ad9ae23f2debdff590a24ee59446c5"
+      "inputs": "f1cb263300d8e1b136898e00dcb1e9007f95fa85a6c6965d9f263860c8664ff7"
     },
     "js/logbrew-vue": {
       "share": 100.0,
@@ -969,7 +969,7 @@
       },
       "method": "Vue 3 app mounted under happy-dom with createLogBrewVuePlugin, which installs @logbrew/browser with its fetch transport, breadcrumbs, and request spans, plus $logbrew and console capture; one API call through window.fetch under tracePropagationTargets and a click handler that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-vue",
-      "inputs": "f73c3ce95a300a293dd55547721dfc086cb9b5a73f0703e3cc2b893249ad85f3"
+      "inputs": "cfa17d44dd641ae2d3b77ccc4c6ed42d0f982f35c4b4570aecbe57c62dce0904"
     },
     "kotlin/logbrew-kotlin": {
       "share": 100.0,

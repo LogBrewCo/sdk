@@ -1,3 +1,23 @@
+/**
+ * Capture browser errors, page views, actions, network spans, and web vitals
+ * with LogBrew.
+ *
+ * @example
+ * ```js
+ * import { installLogBrewBrowser } from "@logbrew/browser";
+ *
+ * const logbrew = installLogBrewBrowser({ clientKey: "LOGBREW_BROWSER_KEY" });
+ *
+ * logbrew.client.log("evt_log_001", new Date().toISOString(), {
+ *   message: "browser app started",
+ *   level: "info",
+ *   logger: "browser"
+ * });
+ * ```
+ *
+ * @module
+ */
+
 import type { ActionAttributes, IssueAttributes, LogBrewClient, SpanAttributes, Transport, TransportResponse } from "@logbrew/sdk";
 import type {
   BeaconTransport,
