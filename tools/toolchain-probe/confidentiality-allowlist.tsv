@@ -496,3 +496,6 @@ tools/pin-check/go.sum	*	re	^[a-z0-9./_-]+ v[0-9][0-9a-z.+-]*(/go\.mod)? h1:[A-Z
 tools/pin-check/go.mod	*	re	^\t[a-z0-9./_-]+ v[0-9][0-9a-z.+-]*( // indirect)?$
 scripts/lockfiles/python/*.txt	secret	only	secretstorage
 quality/unpinned-installs.tsv	restore	re	^[a-z0-9_./-]+\tdotnet restore 
+# Dependabot names its job credentials in a config comment, never values.
+.github/dependabot.yml	credential	ihas	fetches lockfile hashes once for each job credential
+.github/dependabot.yml	credential	ihas	the github.com git credential becomes an empty index url
