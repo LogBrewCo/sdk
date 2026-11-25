@@ -119,6 +119,11 @@ updates:
     groups:
       gomod:
         patterns: ["*"]
+    ignore:
+      # The Go SDK modules require each other through local replace
+      # directives. Dependabot resolves those requires from the module proxy
+      # instead and fails with "unknown revision 000000000000".
+      - dependency-name: github.com/LogBrewCo/sdk/*
   - package-ecosystem: gradle
     directories:
       - /js/logbrew-react-native/android
