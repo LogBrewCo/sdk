@@ -10,13 +10,14 @@ import {
   openExtensionPreferences,
 } from "@raycast/api";
 import type { Mark, Screen } from "./screens";
-import type { Platform, Request } from "./session";
-import type { Reply, Severity } from "./api";
+import { send, sleep } from "./http";
 import { startSignIn, waitForApproval } from "./sign-in";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Image } from "@raycast/api";
 import type { JSX } from "react";
 import type { Origins } from "./logbrew";
+import type { Platform } from "./session";
+import type { Severity } from "./api";
 import type { SignIn } from "./sign-in";
 import { originsFrom } from "./logbrew";
 import { signOut } from "./session";
@@ -25,7 +26,6 @@ type LogBrewPreferences = Readonly<{ apiUrl: string }>;
 
 type Connection = Readonly<{ origins: Origins; platform: Platform }>;
 
-const requestTimeout = 15_000;
 const severityColors: Readonly<Record<Severity, Color>> = {
   critical: Color.Magenta,
   error: Color.Red,
@@ -53,45 +53,13 @@ const marks: Readonly<Record<Mark, Image.ImageLike>> = {
   signIn: "icon.png",
 };
 
-function headersFor(request: Request): Headers {
-  const headers = new Headers({ accept: "application/json" });
-  if (request.contentType !== undefined) {
-    headers.set("content-type", request.contentType);
-  }
-  if (request.token !== undefined) {
-    headers.set("authorization", `Bearer ${request.token}`);
-  }
-  return headers;
-}
-
-async function send(request: Request): Promise<Reply> {
-  const response = await fetch(request.url, {
-    body: request.body,
-    headers: headersFor(request),
-    method: request.method,
-    signal: AbortSignal.timeout(requestTimeout),
-  });
-  const raw = await response.text();
-  try {
-    const body: unknown = JSON.parse(raw);
-    return { body, status: response.status };
-  } catch {
-    return { body: undefined, status: response.status };
-  }
-}
-
-async function sleep(milliseconds: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<undefined>();
-  setTimeout(resolve, milliseconds);
-  await promise;
-}
-
 function connect(): Connection | undefined {
   const origins = originsFrom(getPreferenceValues<LogBrewPreferences>().apiUrl);
   if (origins === undefined) {
     return undefined;
   }
   const platform: Platform = {
+    client: { id: "logbrew-raycast", name: "LogBrew for Raycast" },
     now: () => Date.now(),
     origin: origins.api,
     read: async (key) => LocalStorage.getItem<string>(key),

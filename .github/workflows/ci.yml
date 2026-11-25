@@ -378,9 +378,21 @@ jobs:
         if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: bash scripts/real_user_rust_tracing_smoke.sh
 
+      - name: Package the VS Code extension
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: |
+          set -euo pipefail
+          cd apps/vscode
+          bun install --frozen-lockfile --ignore-scripts
+          bun run package
+          unzip -l logbrew.vsix > "$RUNNER_TEMP/vsix.txt"
+          cat "$RUNNER_TEMP/vsix.txt"
+          grep -q 'extension/dist/extension.js' "$RUNNER_TEMP/vsix.txt"
+          ! grep -E 'extension/(src|node_modules)/' "$RUNNER_TEMP/vsix.txt"
+
       - name: Run JavaScript SDK tests
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
-        run: cd js/logbrew-js && bun test && cd ../logbrew-browser && bun test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test && cd ../../apps/raycast && bun test
+        run: cd js/logbrew-js && bun test && cd ../logbrew-browser && bun test && cd ../logbrew-node && npm test && cd ../logbrew-prisma && npm test && cd ../logbrew-bullmq && npm test && cd ../logbrew-kafkajs && npm test && cd ../logbrew-amqplib && npm test && cd ../logbrew-aws-sqs && npm test && cd ../logbrew-express && npm test && cd ../logbrew-fastify && npm test && cd ../logbrew-nestjs && npm test && cd ../logbrew-angular && npm test && cd ../logbrew-vue && npm test && cd ../logbrew-svelte && npm test && cd ../logbrew-react && npm test && cd ../logbrew-react-native && npm test && cd ../logbrew-next && npm test && cd ../../apps/raycast && bun test && cd ../vscode && bun test
 
       - name: Run JavaScript real-user smoke test
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}

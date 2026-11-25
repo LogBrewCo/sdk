@@ -28,6 +28,7 @@ updates:
   - package-ecosystem: bun
     directories:
       - /apps/raycast
+      - /apps/vscode
       - /benchmarks
       - /js
       - /js/logbrew-amqplib

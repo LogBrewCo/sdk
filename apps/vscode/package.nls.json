@@ -1,0 +1,23 @@
+{
+  "view.issues": "Issues",
+  "view.errors": "Errors",
+  "command.signIn": "Sign In",
+  "command.signOut": "Sign Out",
+  "command.chooseProject": "Choose Project",
+  "command.refresh": "Refresh",
+  "command.openDashboard": "Open LogBrew",
+  "command.openSettings": "Open Settings",
+  "command.open": "Open in LogBrew",
+  "command.copyLink": "Copy Link",
+  "config.apiUrl": "The LogBrew API address. Keep `https://api.logbrew.co` unless your team runs LogBrew at another address.",
+  "welcome.signedOut": "See the newest issues of this project without leaving the editor.\n[Sign In](command:logbrew.signIn)\nSign in with your browser. Nothing to copy or paste.",
+  "welcome.errors.signedOut": "Sign in to see the errors this project logged in the last 24 hours.",
+  "welcome.signingIn": "Approve the sign-in in your browser, then come back.",
+  "welcome.chooseProject": "Pick the LogBrew project that sends errors from this workspace.\n[Choose Project](command:logbrew.chooseProject)",
+  "welcome.errors.chooseProject": "Choose a project to see its errors.",
+  "welcome.noProjects": "Create a project in LogBrew, then send your first event.\n[Open LogBrew](command:logbrew.openDashboard)",
+  "welcome.errors.noProjects": "Errors appear here after your first event.",
+  "welcome.badUrl": "The LogBrew API URL is not valid. Fix it in Settings.\n[Open Settings](command:logbrew.openSettings)",
+  "welcome.errors.badUrl": "Fix the API URL to see errors.",
+  "welcome.loading": "Loading…"
+}

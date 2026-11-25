@@ -24,6 +24,7 @@ function fake(handler: Handler): Fake {
   const sleeps: number[] = [];
   const clock = { now: start };
   const platform: Platform = {
+    client: { id: "logbrew-raycast", name: "LogBrew for Raycast" },
     now: () => clock.now,
     origin,
     read: async (key) => {

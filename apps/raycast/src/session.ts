@@ -11,7 +11,10 @@ type Request = Readonly<{
 
 type Session = Readonly<{ accessToken: string; expiresAt: number; refreshToken: string }>;
 
+type Client = Readonly<{ id: string; name: string }>;
+
 type Platform = Readonly<{
+  client: Client;
   now: () => number;
   origin: string;
   read: (key: string) => Promise<string | undefined>;
@@ -231,6 +234,7 @@ async function getAuthorized(platform: Platform, path: string): Promise<Outcome<
 }
 
 export {
+  type Client,
   type Platform,
   type Request,
   type Session,
