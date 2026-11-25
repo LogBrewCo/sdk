@@ -1,0 +1,9 @@
+{
+  "extends": "../../js/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2024"],
+    "paths": {},
+    "types": ["bun", "node"]
+  },
+  "include": ["src/**/*"]
+}

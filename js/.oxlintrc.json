@@ -1310,6 +1310,64 @@
       "rules": {
         "unicorn/prefer-event-target": "off"
       }
+    },
+    {
+      "files": [
+        "**/apps/zapier/**"
+      ],
+      "rules": {
+        "eslint/no-duplicate-imports": [
+          "error",
+          {
+            "allowSeparateTypeImports": true
+          }
+        ],
+        "typescript/prefer-readonly-parameter-types": [
+          "error",
+          {
+            "allow": [
+              {
+                "from": "package",
+                "name": [
+                  "Bundle",
+                  "ZObject"
+                ],
+                "package": "zapier-platform-core"
+              },
+              {
+                "from": "package",
+                "name": "Request",
+                "package": "bun-types"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "**/apps/zapier/src/index.ts"
+      ],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": [
+        "**/apps/zapier/src/api.ts",
+        "**/apps/zapier/src/app.test.ts"
+      ],
+      "rules": {
+        "node/no-process-env": "off"
+      }
+    },
+    {
+      "files": [
+        "**/apps/zapier/src/fixture.ts"
+      ],
+      "rules": {
+        "unicorn/no-null": "off"
+      }
     }
   ]
 }

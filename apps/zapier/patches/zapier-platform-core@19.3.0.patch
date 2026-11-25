@@ -1,0 +1,13 @@
+diff --git a/types/inputs.d.ts b/types/inputs.d.ts
+index fcb231b2931b1ed9be6d4d10af9c478dc4096379..14a34d037d1ad61de343aeca7ee4d4b7e514b8c7 100644
+--- a/types/inputs.d.ts
++++ b/types/inputs.d.ts
+@@ -175,7 +175,7 @@ type FieldResultTypes = {
+  * type result = PrimitiveFieldResultType<{ type: 'boolean' }>;
+  * // boolean
+  */
+-type PrimitiveFieldResultType<$Field extends PlainInputField> = $Field extends {
++type PrimitiveFieldResultType<$Field> = $Field extends {
+   type: infer $T extends PlainInputField['type'];
+ }
+   ? $T extends string

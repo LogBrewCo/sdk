@@ -38,6 +38,7 @@ updates:
     directories:
       - /apps/raycast
       - /apps/vscode
+      - /apps/zapier
       - /benchmarks
       - /js
       - /js/logbrew-amqplib

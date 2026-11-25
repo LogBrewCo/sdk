@@ -1,0 +1,34 @@
+{
+  "name": "logbrew-zapier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LogBrew for Zapier. Start Zaps on new issues and fired alerts, send logs, and resolve issues.",
+  "license": "MIT",
+  "homepage": "https://logbrew.co",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LogBrewCo/sdk.git",
+    "directory": "apps/zapier"
+  },
+  "type": "module",
+  "exports": "./dist/index.js",
+  "scripts": {
+    "_zapier-build": "bun run build",
+    "build": "tsc --project tsconfig.build.json",
+    "test": "bun test",
+    "validate": "DISABLE_ZAPIER_ANALYTICS=1 zapier-platform validate --skip-build --without-style"
+  },
+  "dependencies": {
+    "zapier-platform-core": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "@types/node": "26.6.6",
+    "@types/node-fetch": "2.6.13",
+    "typescript": "7.0.2",
+    "zapier-platform-cli": "19.3.0"
+  },
+  "patchedDependencies": {
+    "zapier-platform-core@19.3.0": "patches/zapier-platform-core@19.3.0.patch"
+  }
+}
