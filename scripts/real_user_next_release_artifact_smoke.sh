@@ -481,8 +481,12 @@ assert runtime_issue["metadata"]["release"] == "2026.06.18-next"
 assert runtime_issue["metadata"]["environment"] == "production"
 assert runtime_issue["metadata"]["service"] == "checkout-next-web"
 assert runtime_issue["metadata"]["runtime"] == "browser"
-assert runtime_issue["metadata"]["traceId"] == "ffeeddccbbaa99887766554433221100"
-assert runtime_issue["metadata"]["spanId"] == "9999aaaabbbbcccc"
+assert runtime_issue["context"]["trace"] == {
+    "traceId": "ffeeddccbbaa99887766554433221100",
+    "spanId": "9999aaaabbbbcccc",
+    "sampled": True,
+}
+assert "traceId" not in runtime_issue["metadata"]
 assert "static.example" not in serialized_runtime_issue
 assert "logbrew_next_cache_placeholder" not in serialized_runtime_issue
 assert "logbrew_next_hash_placeholder" not in serialized_runtime_issue

@@ -703,9 +703,13 @@ assert runtime_issue["metadata"]["errorFrameLine"] > 0
 assert runtime_issue["metadata"]["errorFrameColumn"] > 0
 assert runtime_issue["metadata"]["issueGroupingKey"] == f"react-native.error:Error:{runtime_path}"
 assert runtime_issue["metadata"]["issueGroupingSource"] == "error_type_and_frame"
-assert runtime_issue["metadata"]["traceId"] == "4bf92f3577b34da6a3ce929d0e0e4736"
-assert runtime_issue["metadata"]["parentSpanId"] == "00f067aa0ba902b7"
-assert runtime_issue["metadata"]["spanId"] == "b7ad6b7169203331"
+assert runtime_issue["context"]["trace"] == {
+    "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "spanId": "b7ad6b7169203331",
+    "parentSpanId": "00f067aa0ba902b7",
+    "sampled": True,
+}
+assert "traceId" not in runtime_issue["metadata"]
 assert "mobile.example" not in serialized_runtime_issue
 assert "logbrew_rn_query_placeholder" not in serialized_runtime_issue
 assert "logbrew_rn_hash_placeholder" not in serialized_runtime_issue
