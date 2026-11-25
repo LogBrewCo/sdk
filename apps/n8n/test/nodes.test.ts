@@ -142,15 +142,20 @@ test("trigger lists only active projects", async () => {
   expect(await loadProjects(new LogBrew())).toEqual([{ name: "Checkout", value: projectId }]);
 });
 
-test("trigger emits issues first seen after the cursor, oldest first, then nothing", async () => {
+test("trigger reads every issue page after the cursor and emits new issues oldest first, then nothing", async () => {
   const state: Record<string, unknown> = { cursor: "2026-11-25T10:00:00Z" };
   const setup = { parameters: { event: "issueCreated", projectId }, state };
+  const sent = fixture.requests.length;
   const first = await run(new LogBrewTrigger(), "poll", setup);
   expect(pick(first, ["id", "severity", "url"])).toEqual([
     [resetIssue.id, "warning", `${fixture.url}/dashboard/issues/${resetIssue.id}`],
     [typeIssue.id, "error", `${fixture.url}/dashboard/issues/${typeIssue.id}`],
   ]);
-  expect(lastRequest()?.query).toBe(`?limit=500&project_id=${projectId}&since=2026-11-25T10%3A00%3A00Z`);
+  const page = `?limit=500&pagination=cursor&response_version=7&project_id=${projectId}&since=2026-11-25T10%3A00%3A00Z`;
+  expect(fixture.requests.slice(sent).map((request) => request.query)).toEqual([
+    page,
+    `${page}&cursor_id=${paymentIssue.id}&cursor_time=2026-11-25T12%3A00%3A00Z`,
+  ]);
   expect(state["cursor"]).toBe("2026-11-25T11:30:00Z");
   expect(await run(new LogBrewTrigger(), "poll", setup)).toBeNull();
 });
@@ -162,9 +167,13 @@ test("trigger starts from now on the first poll", async () => {
   expect(Date.parse(String(state["cursor"]))).toBeGreaterThanOrEqual(before);
 });
 
-test("trigger shows the newest issue in a manual test", async () => {
+test("trigger shows the newest issue of the first page in a manual test", async () => {
+  const sent = fixture.requests.length;
   const result = await run(new LogBrewTrigger(), "poll", { mode: "manual", parameters: { event: "issueCreated", projectId } });
   expect(pick(result, ["id", "severity"])).toEqual([[typeIssue.id, "error"]]);
+  expect(fixture.requests.slice(sent).map((request) => request.query)).toEqual([
+    `?limit=500&pagination=cursor&response_version=7&project_id=${projectId}`,
+  ]);
 });
 
 test("trigger uses the issue's triage severity", async () => {

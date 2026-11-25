@@ -5,7 +5,9 @@ type Fixture = Readonly<{ requests: Recorded[]; stop: () => Promise<void>; url: 
 const apiToken = "lbw_pat_fixture";
 const ingestKey = "lbw_ingest_fixture";
 const projectId = "11111111-1111-4111-8111-111111111111";
-const status = { forbidden: 403, notFound: 404, ok: 200, unauthorized: 401 } as const;
+const status = { badRequest: 400, forbidden: 403, notFound: 404, ok: 200, unauthorized: 401 } as const;
+const firstRow = 0;
+const pageSize = 2;
 
 const paymentIssue = {
     environment: "production",
@@ -27,7 +29,7 @@ const typeIssue = {
     environment: "production",
     first_seen_at: "2026-11-25T11:30:00Z",
     id: "22222222-2222-4222-8222-222222222202",
-    last_seen_at: "2026-11-25T11:45:00Z",
+    last_seen_at: "2026-11-25T12:30:00Z",
     message: "Cannot read properties of undefined",
     occurrence_count: 1,
     project_id: projectId,
@@ -107,9 +109,27 @@ function notFound(error: string, next: string): Response {
 }
 
 function listIssues(search: string): Response {
-  const since = Date.parse(new URLSearchParams(search).get("since") ?? "");
-  const listed = Number.isNaN(since) ? issues : issues.filter((issue) => Date.parse(issue.last_seen_at) >= since);
-  return json(listed.toSorted((left, right) => Date.parse(right.last_seen_at) - Date.parse(left.last_seen_at)));
+  const params = new URLSearchParams(search);
+  if (params.get("pagination") !== "cursor" || params.get("response_version") !== "7") {
+    return json(
+      { code: "validation", error: "Unsupported issue list request", next: "send pagination=cursor and response_version=7" },
+      status.badRequest,
+    );
+  }
+  const since = Date.parse(params.get("since") ?? "");
+  const cursorTime = Date.parse(params.get("cursor_time") ?? "");
+  const cursorId = params.get("cursor_id") ?? "";
+  const listed = issues
+    .filter((issue) => Number.isNaN(since) || Date.parse(issue.last_seen_at) >= since)
+    .toSorted((left, right) => Date.parse(right.last_seen_at) - Date.parse(left.last_seen_at))
+    .filter((issue) => {
+      const seen = Date.parse(issue.last_seen_at);
+      return Number.isNaN(cursorTime) || seen < cursorTime || (seen === cursorTime && issue.id < cursorId);
+    });
+  const page = listed.slice(firstRow, pageSize);
+  const [last] = page.toReversed();
+  const more = listed.length > page.length && last !== undefined;
+  return json({ issues: page, next_cursor: more ? { id: last.id, time: last.last_seen_at } : null });
 }
 
 function resolve(path: string): Response {
@@ -127,7 +147,16 @@ function route(method: string, path: string, search: string): Response {
   const routes: Readonly<Record<string, () => Response>> = {
     "/api/projects": () => json(projects),
     [`/api/projects/${projectId}/alert-rules`]: () => json({ project_id: projectId, rules }),
-    "/api/telemetry/ingest": () => json({ actions: 0, already_accepted: 0, issues: 0, logs: 1, trace_spans: 0 }),
+    "/api/telemetry/ingest": () =>
+      json({
+        actions: 0,
+        already_accepted: 0,
+        issues: 0,
+        logs: 1,
+        next: "open LogBrew to review the telemetry",
+        next_action: { code: "review_ingested_telemetry", target: "telemetry_reads" },
+        trace_spans: 0,
+      }),
     "/api/telemetry/issues": () => listIssues(search),
   };
   const handler = routes[path];
