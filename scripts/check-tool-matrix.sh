@@ -9,6 +9,8 @@
 # - a tool's `pins` text (with @VERSION@ replaced by its version) is missing from its file;
 # - a tool was last checked more than 30 days ago, or in the future;
 # - a tool lacks a required field, or names a command no gate runs.
+# It passes with a warning (a GitHub Actions annotation in CI) for each tool whose
+# 30 days end within 7 days, so the entry is updated before the check fails.
 # A `commands` entry ending in * covers every command that starts with it.
 #
 # The gates are every workflow plus the scripts the matrix lists in `gates`.
@@ -34,6 +36,7 @@ days() { # days since 1970-01-01 for YYYY-MM-DD, without GNU date
 
 errors=()
 fail() { errors+=("$*"); }
+warnings=()
 
 # Split the matrix into tool blocks (the header is block 0).
 work="$(mktemp -d)"
@@ -57,6 +60,8 @@ for block in "$work"/[1-9]*; do
         fail "$id: checked $checked is in the future"
     elif (($(days "$today") - $(days "$checked") > 30)); then
         fail "$id: last checked $checked, more than 30 days ago; check its releases, advisories, and rules, then update the entry"
+    elif ((left = 31 - ($(days "$today") - $(days "$checked")), left <= 7)); then
+        warnings+=("$id: last checked $checked; this check fails on it in $left day$( ((left == 1)) || echo s); check its releases, advisories, and rules, then update the entry")
     fi
     if ! grep -q '^pins = ' "$block" && ! grep -q '^unpinned = "..*"' "$block"; then
         fail "$id: needs \`pins\` or \`unpinned\` (the reason)"
@@ -225,6 +230,13 @@ while IFS= read -r name; do
         fail "action \`$name\` is in a tool's \`uses\` but no workflow uses it; remove it"
 done <"$work/uses"
 
+for warning in ${warnings[@]+"${warnings[@]}"}; do
+    if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+        printf '::warning title=Tool matrix::%s\n' "$warning" >&2
+    else
+        printf 'tool matrix: warning: %s\n' "$warning" >&2
+    fi
+done
 if ((${#errors[@]} > 0)); then
     printf 'tool matrix: %s\n' "${errors[@]}" >&2
     exit 1
