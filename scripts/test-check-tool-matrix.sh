@@ -7,6 +7,8 @@
 # pinned to a tag, an unlisted action, one action pinned two ways, an entry not
 # checked for 30 days, and a missing field. An action update across every
 # workflow and a listed self-repository action ($/path) pass without a pin.
+# An entry whose 30 days end within 7 days passes with a warning, and one with
+# 8 days left passes without one.
 
 set -euo pipefail
 
@@ -105,6 +107,30 @@ printf 'ok: a listed self-repository action needs no pin\n'
 copy
 expect_failure "an entry not checked for 30 days" "more than 30 days ago" "2099-01-01"
 expect_failure "an entry checked in the future" "is in the future" "2000-01-01"
+
+# Every entry last checked on 2026-01-01: the check fails on them from 2026-02-01.
+sed 's/^checked = .*/checked = 2026-01-01/' "$root/quality/tool-matrix.toml" >"$work/repo/quality/tool-matrix.toml"
+expect_pass() {
+    local name="$1" today="$2" needle="$3" output
+    output="$(GITHUB_ACTIONS="${4:-}" bash "$check" "$work/repo" "$today" 2>&1)" || {
+        printf 'FAIL: %s failed:\n%s\n' "$name" "$output" >&2
+        exit 1
+    }
+    if [[ -n "$needle" ]]; then
+        grep -qF -- "$needle" <<<"$output"
+    else
+        ! grep -qiF -- "warning" <<<"$output"
+    fi || {
+        printf 'FAIL: %s did not report "%s":\n%s\n' "$name" "${needle:-no warning}" "$output" >&2
+        exit 1
+    }
+    printf 'ok: %s\n' "$name"
+}
+expect_pass "an entry with 8 days left" "2026-01-24" ""
+expect_pass "an entry with 7 days left" "2026-01-25" "this check fails on it in 7 days;"
+expect_pass "an entry on its last day" "2026-01-31" "this check fails on it in 1 day;"
+expect_pass "a warning in GitHub Actions" "2026-01-31" "::warning title=Tool matrix::" true
+expect_failure "an entry one day after its last day" "more than 30 days ago" "2026-02-01"
 
 copy
 sed 's/^findings = /unreviewed = /' "$root/quality/tool-matrix.toml" >"$work/repo/quality/tool-matrix.toml"
