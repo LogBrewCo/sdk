@@ -466,7 +466,7 @@ js/logbrew-react-native/metadata.cjs	secret	item	secret
 js/logbrew-react-native/metadata.cjs	password	item	password
 
 # Lock files pin package integrity hashes, which can spell a listed word by chance.
-{js/bun.lock,apps/raycast/bun.lock,apps/vscode/bun.lock,apps/zapier/bun.lock,benchmarks/bun.lock,tools/npm-publish/bun.lock}	*	re	^    "[@a-z0-9/._-]+": \["[@a-z0-9/._-]+@[0-9][0-9a-z.+-]*", "", \{[^\[\]]*\}, "sha512-[A-Za-z0-9+/]{86}=="\],$
+{js/bun.lock,apps/raycast/bun.lock,apps/vscode/bun.lock,apps/zapier/bun.lock,apps/n8n/bun.lock,benchmarks/bun.lock,tools/npm-publish/bun.lock}	*	re	^    "[@a-z0-9/._-]+": \["[@a-z0-9/._-]+@[0-9][0-9a-z.+-]*", "", \{[^\[\]]*\}, "sha512-[A-Za-z0-9+/]{86}=="\],$
 
 # Expo's CLI depends on dnssd-advertise, whose name starts with a listed word.
 js/bun.lock	dns	has	"dnssd-advertise": "^
@@ -486,6 +486,11 @@ apps/zapier/src/fixture.ts	*	line	hostname: "127.0.0.1",
 # The VS Code extension keeps the session in the editor's SecretStorage and stops the sign-in when its cancellation token fires.
 apps/vscode/src/extension.ts	secret	re	\b(?:SecretStorage|secrets)\b
 apps/vscode/src/extension.ts	token	re	\btoken(?:\.isCancellationRequested)?\b
+# The n8n node's own vocabulary: its credential type, API token field, and Bearer header. Other sensitive words still fail.
+apps/n8n/**	<=credential,token,password,authorization	any	-
+apps/n8n/test/fixture.ts	*	ihas	hostname: "127.0.0.1"
+js/.oxlintrc.json	*	ihas	"**/apps/n8n/credentials/*.credentials.ts"
+quality/tool-matrix.toml	*	ihas	unicorn/filename-case off in credentials/*.credentials.ts
 js/.oxlintrc.json	token	item	CancellationToken
 js/.oxlintrc.json	secret	item	SecretStorage
 quality/tool-matrix.toml	<=secret,token	has	CancellationToken, ConfigurationChangeEvent, EventEmitter, ExtensionContext, Progress, SecretStorage, TreeView, and WorkspaceFolder from @types/vscode

@@ -29,7 +29,7 @@ Keep the API URL `https://api.logbrew.co`. Change it only when your team runs Lo
 
 - **New issue to Slack.** LogBrew Trigger (New Issue) followed by a Slack node that posts the title, severity, and link.
 - **Alert to a ticket.** LogBrew Trigger (Alert Fired) followed by a Linear or Jira node that opens a ticket.
-- **Log each run.** Add LogBrew (Send a Log) at the end of a workflow, with the order ID or customer ID as attributes.
+- **Log each run.** Add LogBrew (Send a Log) at the end of a workflow, with the order ID or account ID as attributes.
 
 ## Errors
 
