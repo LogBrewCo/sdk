@@ -1,7 +1,8 @@
-import type { Alert, Issue, Poll } from "../LogBrew/client";
+import type { Alert, Issue } from "../LogBrew/records";
 import type { BaseContext, Item, NodeDescription, Option, PollContext } from "../LogBrew/n8n";
 import { connect, projectOptions } from "../LogBrew/transport";
 import { latestAlert, latestIssue, pollFiredAlerts, pollNewIssues } from "../LogBrew/client";
+import type { Poll } from "../LogBrew/client";
 
 type Found = Readonly<{ cursor: string; items: readonly (Alert | Issue)[] }>;
 

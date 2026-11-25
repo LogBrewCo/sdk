@@ -1,4 +1,6 @@
 import { apiToken, ingestKey, paymentIssue, projectId, resetIssue, startFixture, typeIssue } from "./fixture";
+import { fieldsOf, firstIndex, firstOf, outputOf, pick } from "./values";
+import type { Fields } from "./values";
 import { LogBrew } from "../nodes/LogBrew/LogBrew.node";
 import { LogBrewApi } from "../credentials/LogBrewApi.credentials";
 import { LogBrewTrigger } from "../nodes/LogBrewTrigger/LogBrewTrigger.node";
@@ -20,12 +22,9 @@ type Setup = Readonly<{
   state?: Readonly<Record<string, unknown>>;
 }>;
 
-type Fields = Readonly<Record<string, unknown>>;
-
 const fixture = startFixture();
 const oneItem = 1;
 const twoItems = 2;
-const firstIndex = 0;
 const secondIndex = 1;
 const uuid = /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
 
@@ -87,22 +86,6 @@ async function loadProjects(node: object): Promise<unknown> {
   return call(loader, context({ parameters: {} }));
 }
 
-function fieldsOf(value: unknown): Fields {
-  return typeof value === "object" && value !== null ? Object.fromEntries(Object.entries(value)) : {};
-}
-
-function firstOf(value: unknown): unknown {
-  return Array.isArray(value) ? value.at(firstIndex) : undefined;
-}
-
-function outputOf(result: unknown): readonly Fields[] {
-  const items = firstOf(result);
-  if (!Array.isArray(items)) {
-    throw new TypeError("no output items");
-  }
-  return items.map((item: unknown) => fieldsOf(item));
-}
-
 async function failureOf(node: object, method: string, setup: Setup): Promise<string> {
   try {
     await run(node, method, setup);
@@ -110,14 +93,6 @@ async function failureOf(node: object, method: string, setup: Setup): Promise<st
     return error instanceof Error ? error.message : String(error);
   }
   return "";
-}
-
-function jsonOf(item: Fields | undefined): Fields {
-  return fieldsOf(item?.["json"]);
-}
-
-function pick(result: unknown, keys: readonly string[]): readonly (readonly unknown[])[] {
-  return outputOf(result).map((item) => keys.map((key) => jsonOf(item)[key]));
 }
 
 function lastRequest(): (typeof fixture.requests)[number] | undefined {
