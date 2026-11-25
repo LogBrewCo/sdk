@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "dependencies": {
+    "jsr": "0.14.3"
+  }
+}

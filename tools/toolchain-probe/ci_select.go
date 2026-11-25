@@ -31,7 +31,7 @@ var (
 			"real_user_js_", "real_user_browser_", "real_user_node_", "real_user_prisma_", "real_user_bullmq_",
 			"real_user_kafkajs_", "real_user_amqplib_", "real_user_aws_sqs_", "real_user_express_",
 			"real_user_fastify_", "real_user_nestjs_", "real_user_angular_", "real_user_vue_", "real_user_svelte_",
-			"real_user_react_", "check_js_",
+			"real_user_react_", "check_js_", "jsr_",
 		},
 		"python": {
 			"check_fastapi_", "check_flask_", "check_django_", "real_user_fastapi_", "real_user_flask_",
@@ -226,7 +226,7 @@ func ciPathAreas(path string, enabled map[string]bool) {
 	if path == "Cargo.toml" || path == "Cargo.lock" || path == "rust-toolchain.toml" {
 		enabled["rust"] = true
 	}
-	if strings.HasPrefix(path, "js/") || strings.HasPrefix(path, "apps/raycast/") || strings.HasPrefix(path, "apps/vscode/") || strings.HasPrefix(path, "apps/zapier/") {
+	if strings.HasPrefix(path, "js/") || strings.HasPrefix(path, "apps/raycast/") || strings.HasPrefix(path, "apps/vscode/") || strings.HasPrefix(path, "apps/zapier/") || strings.HasPrefix(path, "tools/jsr-publish/") {
 		enabled["javascript"] = true
 		if strings.Contains(path, "release-artifact") || strings.Contains(path, "release_artifact") {
 			enabled["release_artifacts"] = true

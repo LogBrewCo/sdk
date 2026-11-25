@@ -70,6 +70,7 @@ updates:
       - /js/logbrew-svelte/examples
       - /js/logbrew-vue
       - /js/logbrew-vue/examples
+      - /tools/jsr-publish
       - /tools/npm-publish
       - /unity/logbrew-unity
     schedule:
