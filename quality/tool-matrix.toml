@@ -34,7 +34,7 @@ checked = 2026-11-19
 id = "rust"
 risk = "Rust SDK compile errors, compiler lints, and test failures"
 tool = "rustc, cargo, and libtest"
-version = "the channel in rust-toolchain.toml (1.99.1 on 2026-10-23, still the latest stable on 2026-11-03); Dependabot proposes each new stable release; the crate's rust-version (1.88) for the minimum supported Rust check"
+version = "the channel in rust-toolchain.toml (1.100.0, the newest stable on 2026-11-25); Dependabot proposes each new stable release; the crate's rust-version (1.88) for the minimum supported Rust check"
 pins = ["rust-toolchain.toml::channel = \"", ".github/dependabot.yml::package-ecosystem: rust-toolchain", "rust/logbrew/Cargo.toml::rust-version = \"1.88\""]
 uses = ["rust-lang/crates-io-auth-action"]
 commands = ["cargo test", "cargo publish", "rustup"]
@@ -43,9 +43,9 @@ config = "rust/*/Cargo.toml; scripts/check_rust_static.sh checks the library wit
 conflicts = "none known"
 exceptions = "none"
 runtime = "see clippy (the static step builds every target)"
-findings = "unknown: failures are fixed before merge and not recorded; 2026-11-03: rust-version 1.87 fails on let chains in the library, 1.88 passes with the locked and the oldest compatible dependencies"
+findings = "unknown: failures are fixed before merge and not recorded; 2026-11-03: rust-version 1.87 fails on let chains in the library, 1.88 passes with the locked and the oldest compatible dependencies; 2026-11-25: CI on main passes with 1.100.0"
 replaces = "none"
-checked = 2026-11-03
+checked = 2026-11-25
 
 [[tool]]
 id = "clippy-rustfmt"
@@ -59,9 +59,9 @@ config = "rust/logbrew/Cargo.toml [lints] denies every rustc lint group and opt-
 conflicts = "one side of each pair stays off: implicit_return (needless_return), question_mark_used (question_mark), semicolon_outside_block (semicolon_inside_block), pub_with_shorthand (pub_without_shorthand), separated_literal_suffix (unseparated_literal_suffix), self_named_module_files (mod_module_files), ref_patterns (pattern_type_mismatch), single_call_fn (too_many_lines and cognitive_complexity), redundant_pub_crate (unreachable_pub), big_endian_bytes (host_endian_bytes and little_endian_bytes; network byte order stays available), missing_docs_in_private_items (only public API items carry doc comments). Struct field ordering is off because serde writes JSON fields in declaration order. unused_crate_dependencies runs on the library alone, since each test and example uses part of the dev-dependencies"
 exceptions = "exhaustive_structs, exhaustive_enums, and pub_use are off because non_exhaustive public types or public modules in place of re-exports would break callers; max-struct-bools = 5 because the public DeliveryHealthSnapshot has 5 flags; missing_trait_methods is off because it would copy every provided method of the tracing and tower traits; linker_info is off because it turns linker notes about prebuilt dependency objects into errors; serde_json::Value is not a disallowed type because it is the public metadata and event attribute type; tests may unwrap, expect, panic, print, and index (clippy.toml allow-*-in-tests)"
 runtime = "push n=1, max 50 s; pull request n=2, max 51 s (before the feature runs); local 2026-10-30 with the feature runs: 40 s after an edit, 3 s unchanged"
-findings = "2026-10-30: 3,725 findings with all features, 189 of them struct field order, now off; 0 remain, with no allow attributes"
+findings = "2026-10-30: 3,725 findings with all features, 189 of them struct field order, now off; 0 remain, with no allow attributes; 2026-11-25: 0 findings with the Clippy and rustfmt of 1.100.0 on main"
 replaces = "none"
-checked = 2026-10-30
+checked = 2026-11-25
 
 [[tool]]
 id = "mypy"
@@ -322,10 +322,10 @@ runs_in = "Benchmarks workflow, only when benchmarks/ changes; it checks that th
 config = "benchmarks/package.json and benchmarks/package-lock.json"
 conflicts = "none known"
 exceptions = "none"
-runtime = "quick mode, local: about 10 s"
-findings = "none yet: new on 2026-10-29"
+runtime = "benchmarks job, the last 15 runs: max 32 s; p99 unsupported"
+findings = "2026-11-25: esbuild 0.28.2 is still the newest release; 1 of the last 15 runs failed when headless Chrome had not written DevToolsActivePort before benchmarks/overhead/cdp.mjs read it, and a rerun passed (#745)"
 replaces = "none"
-checked = 2026-10-29
+checked = 2026-11-25
 
 [[tool]]
 id = "native-verifier"
@@ -434,10 +434,10 @@ runs_in = "CI Contract checks: Check that changed npm packages advance their ver
 config = "each package manifest: `files` minus README.md and examples, and every manifest field except version and scripts"
 conflicts = "none known"
 exceptions = "none"
-runtime = "new; record from CI runs at the next check"
-findings = "seeded: a code change and a peer range change without a new version each fail; README, example, tsconfig, and scripts changes pass; a dependent waits for its unpublished workspace peer"
+runtime = "version check step, the last 14 runs: max 1 s; Release npm Packages workflow, the last 15 runs: max 1,449 s; p99 unsupported"
+findings = "seeded: a code change and a peer range change without a new version each fail; README, example, tsconfig, and scripts changes pass; a dependent waits for its unpublished workspace peer; 2026-11-25: 2 of the last 15 release runs failed (2026-11-17 and 2026-11-18) when @logbrew/bullmq and @logbrew/vue did not publish; later runs published both, and npm has 0.1.4, the repository version"
 replaces = "none"
-checked = 2026-11-04
+checked = 2026-11-25
 
 [[tool]]
 id = "osv-scanner"
@@ -483,7 +483,7 @@ runs_in = "scorecard workflow: pushes to main, weekly, and branch protection cha
 config = "publish_results: true; results go to the OpenSSF API and to code scanning"
 conflicts = "none known"
 exceptions = "none"
-runtime = "not yet recorded; the workflow is new"
-findings = "unknown: the first run publishes the baseline; record low checks at the next review"
+runtime = "scorecard job, the last 15 successful runs: max 70 s; p99 unsupported"
+findings = "2026-11-25: score 8.3 of 10 (Scorecard v5.6.0 on main, 2026-11-24). Pinned-Dependencies 9: 3 npm and 4 NuGet installs in smoke scripts and release workflows have no hash pin (#744). Code-Review 0 and Contributors 0 (one maintainer merges without review); Branch-Protection 4; CII-Best-Practices 5 (passing badge); Signed-Releases not scored (no GitHub releases)"
 replaces = "none"
-checked = 2026-10-30
+checked = 2026-11-25
