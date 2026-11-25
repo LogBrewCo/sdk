@@ -466,16 +466,22 @@ js/logbrew-react-native/metadata.cjs	secret	item	secret
 js/logbrew-react-native/metadata.cjs	password	item	password
 
 # Lock files pin package integrity hashes, which can spell a listed word by chance.
-{js/bun.lock,apps/raycast/bun.lock,apps/vscode/bun.lock,benchmarks/bun.lock,tools/npm-publish/bun.lock}	*	re	^    "[@a-z0-9/._-]+": \["[@a-z0-9/._-]+@[0-9][0-9a-z.+-]*", "", \{[^\[\]]*\}, "sha512-[A-Za-z0-9+/]{86}=="\],$
+{js/bun.lock,apps/raycast/bun.lock,apps/vscode/bun.lock,apps/zapier/bun.lock,benchmarks/bun.lock,tools/npm-publish/bun.lock}	*	re	^    "[@a-z0-9/._-]+": \["[@a-z0-9/._-]+@[0-9][0-9a-z.+-]*", "", \{[^\[\]]*\}, "sha512-[A-Za-z0-9+/]{86}=="\],$
 
 # Expo's CLI depends on dnssd-advertise, whose name starts with a listed word.
 js/bun.lock	dns	has	"dnssd-advertise": "^
-{apps/raycast/bun.lock,apps/vscode/bun.lock}	password	has	"@inquirer/password
+{apps/raycast/bun.lock,apps/vscode/bun.lock,apps/zapier/bun.lock}	password	has	"@inquirer/password
+# zapier-platform-core depends on @zapier/secret-scrubber, whose name holds a listed word.
+apps/zapier/bun.lock	secret	has	"@zapier/secret-scrubber": "^
 # The Raycast extension names the browser sign-in and session renewal fields of the LogBrew API, and refuses links that carry a user name or password.
 {apps/raycast/src/session.ts,apps/raycast/src/fake.ts,apps/raycast/src/*.test.ts}	token	re	\b(?:accessToken|refreshToken|access_token|refresh_token|expired_token|token)\b
 apps/raycast/src/http.ts	token	re	\brequest\.token\b
 apps/raycast/src/sign-in.ts	token	re	expired_token|/api/auth/device/token
 {apps/raycast/src/logbrew.ts,apps/raycast/src/sign-in.ts}	password	re	url\.password [!=]== ""
+# The Zapier integration names the LogBrew API token field, its password inputs, and the error a wrong token gets; its test fixture listens on the loopback address.
+{apps/zapier/README.md,apps/zapier/src/*.ts}	token	re	(?i)\bapiToken\b|API Tokens?\b|create a token|Bearer <token>|invalid_token|expired token
+apps/zapier/src/index.ts	password	has	type: "password"
+apps/zapier/src/fixture.ts	*	line	hostname: "127.0.0.1",
 # The VS Code extension's lint exceptions name VS Code API types.
 # The VS Code extension keeps the session in the editor's SecretStorage and stops the sign-in when its cancellation token fires.
 apps/vscode/src/extension.ts	secret	re	\b(?:SecretStorage|secrets)\b

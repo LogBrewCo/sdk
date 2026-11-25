@@ -226,7 +226,7 @@ func ciPathAreas(path string, enabled map[string]bool) {
 	if path == "Cargo.toml" || path == "Cargo.lock" || path == "rust-toolchain.toml" {
 		enabled["rust"] = true
 	}
-	if strings.HasPrefix(path, "js/") || strings.HasPrefix(path, "apps/raycast/") || strings.HasPrefix(path, "apps/vscode/") {
+	if strings.HasPrefix(path, "js/") || strings.HasPrefix(path, "apps/raycast/") || strings.HasPrefix(path, "apps/vscode/") || strings.HasPrefix(path, "apps/zapier/") {
 		enabled["javascript"] = true
 		if strings.Contains(path, "release-artifact") || strings.Contains(path, "release_artifact") {
 			enabled["release_artifacts"] = true
