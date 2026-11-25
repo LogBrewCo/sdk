@@ -22,7 +22,6 @@ type Stop = "denied" | "expired" | "invalid" | "offline";
 
 type Poll = "approved" | "pending" | "slowDown" | "unreachable" | Stop;
 
-const client = { id: "logbrew-raycast", name: "LogBrew for Raycast" } as const;
 const grantType = "urn:ietf:params:oauth:grant-type:device_code";
 const limits = {
   defaultInterval: 5,
@@ -101,7 +100,7 @@ function readAuthorization(reply: Reply, now: number): Authorization | undefined
 async function startSignIn(platform: Platform): Promise<SignIn> {
   try {
     const reply = await platform.send({
-      body: form({ client_id: client.id, client_name: client.name }),
+      body: form({ client_id: platform.client.id, client_name: platform.client.name }),
       contentType: "application/x-www-form-urlencoded",
       method: "POST",
       url: `${platform.origin}/api/auth/device`,
@@ -133,7 +132,7 @@ async function pollOnce(
 ): Promise<Readonly<{ poll: Poll; reply?: Reply }>> {
   try {
     const reply = await platform.send({
-      body: form({ client_id: client.id, device_code: authorization.deviceCode, grant_type: grantType }),
+      body: form({ client_id: platform.client.id, device_code: authorization.deviceCode, grant_type: grantType }),
       contentType: "application/x-www-form-urlencoded",
       method: "POST",
       url: `${platform.origin}/api/auth/device/token`,

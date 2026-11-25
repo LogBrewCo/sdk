@@ -1,0 +1,279 @@
+{
+  "name": "logbrew",
+  "displayName": "LogBrew",
+  "description": "See the newest errors, issues, and logs of your project in the editor, and open each one in LogBrew.",
+  "version": "0.1.0",
+  "publisher": "logbrew",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "homepage": "https://logbrew.co",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LogBrewCo/sdk",
+    "directory": "apps/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/LogBrewCo/sdk/issues"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "error tracking",
+    "error monitoring",
+    "logging",
+    "logs",
+    "crash reporting",
+    "observability",
+    "debugging",
+    "production errors",
+    "stack trace",
+    "logbrew"
+  ],
+  "galleryBanner": {
+    "color": "#2b1d16",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "extensionKind": [
+    "ui",
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "logbrew",
+          "title": "LogBrew",
+          "icon": "media/mug.svg"
+        }
+      ]
+    },
+    "views": {
+      "logbrew": [
+        {
+          "id": "logbrew.issues",
+          "name": "%view.issues%"
+        },
+        {
+          "id": "logbrew.errors",
+          "name": "%view.errors%"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "logbrew.issues",
+        "contents": "%welcome.signedOut%",
+        "when": "logbrew.state == signedOut"
+      },
+      {
+        "view": "logbrew.issues",
+        "contents": "%welcome.signingIn%",
+        "when": "logbrew.state == signingIn"
+      },
+      {
+        "view": "logbrew.issues",
+        "contents": "%welcome.chooseProject%",
+        "when": "logbrew.state == chooseProject"
+      },
+      {
+        "view": "logbrew.issues",
+        "contents": "%welcome.noProjects%",
+        "when": "logbrew.state == noProjects"
+      },
+      {
+        "view": "logbrew.issues",
+        "contents": "%welcome.badUrl%",
+        "when": "logbrew.state == badUrl"
+      },
+      {
+        "view": "logbrew.issues",
+        "contents": "%welcome.loading%",
+        "when": "logbrew.state == loading"
+      },
+      {
+        "view": "logbrew.errors",
+        "contents": "%welcome.errors.signedOut%",
+        "when": "logbrew.state == signedOut"
+      },
+      {
+        "view": "logbrew.errors",
+        "contents": "%welcome.signingIn%",
+        "when": "logbrew.state == signingIn"
+      },
+      {
+        "view": "logbrew.errors",
+        "contents": "%welcome.errors.chooseProject%",
+        "when": "logbrew.state == chooseProject"
+      },
+      {
+        "view": "logbrew.errors",
+        "contents": "%welcome.errors.noProjects%",
+        "when": "logbrew.state == noProjects"
+      },
+      {
+        "view": "logbrew.errors",
+        "contents": "%welcome.errors.badUrl%",
+        "when": "logbrew.state == badUrl"
+      },
+      {
+        "view": "logbrew.errors",
+        "contents": "%welcome.loading%",
+        "when": "logbrew.state == loading"
+      }
+    ],
+    "commands": [
+      {
+        "command": "logbrew.signIn",
+        "title": "%command.signIn%",
+        "category": "LogBrew",
+        "icon": "$(account)"
+      },
+      {
+        "command": "logbrew.signOut",
+        "title": "%command.signOut%",
+        "category": "LogBrew",
+        "icon": "$(sign-out)"
+      },
+      {
+        "command": "logbrew.chooseProject",
+        "title": "%command.chooseProject%",
+        "category": "LogBrew",
+        "icon": "$(project)"
+      },
+      {
+        "command": "logbrew.refresh",
+        "title": "%command.refresh%",
+        "category": "LogBrew",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "logbrew.openDashboard",
+        "title": "%command.openDashboard%",
+        "category": "LogBrew",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "logbrew.openSettings",
+        "title": "%command.openSettings%",
+        "category": "LogBrew"
+      },
+      {
+        "command": "logbrew.open",
+        "title": "%command.open%",
+        "category": "LogBrew",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "logbrew.copyLink",
+        "title": "%command.copyLink%",
+        "category": "LogBrew"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "logbrew.refresh",
+          "when": "view =~ /^logbrew\\./ && logbrew.state =~ /^(ready|failed)$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "logbrew.chooseProject",
+          "when": "view =~ /^logbrew\\./ && logbrew.state == ready",
+          "group": "1_project@1"
+        },
+        {
+          "command": "logbrew.openDashboard",
+          "when": "view =~ /^logbrew\\./ && logbrew.state =~ /^(ready|chooseProject|noProjects|failed)$/",
+          "group": "1_project@2"
+        },
+        {
+          "command": "logbrew.signOut",
+          "when": "view =~ /^logbrew\\./ && logbrew.state =~ /^(ready|chooseProject|noProjects|failed)$/",
+          "group": "2_account@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "logbrew.open",
+          "when": "viewItem == logbrew.item",
+          "group": "inline"
+        },
+        {
+          "command": "logbrew.open",
+          "when": "viewItem == logbrew.item",
+          "group": "1_open@1"
+        },
+        {
+          "command": "logbrew.copyLink",
+          "when": "viewItem == logbrew.item",
+          "group": "1_open@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "logbrew.signIn",
+          "when": "logbrew.state == signedOut"
+        },
+        {
+          "command": "logbrew.signOut",
+          "when": "logbrew.state =~ /^(ready|chooseProject|noProjects|failed)$/"
+        },
+        {
+          "command": "logbrew.chooseProject",
+          "when": "logbrew.state =~ /^(ready|chooseProject)$/"
+        },
+        {
+          "command": "logbrew.refresh",
+          "when": "logbrew.state =~ /^(ready|failed)$/"
+        },
+        {
+          "command": "logbrew.open",
+          "when": "false"
+        },
+        {
+          "command": "logbrew.copyLink",
+          "when": "false"
+        },
+        {
+          "command": "logbrew.openSettings",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "LogBrew",
+      "properties": {
+        "logbrew.apiUrl": {
+          "type": "string",
+          "default": "https://api.logbrew.co",
+          "format": "uri",
+          "scope": "application",
+          "markdownDescription": "%config.apiUrl%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "bun build src/extension.ts --target node --format cjs --external vscode --minify --outfile dist/extension.js",
+    "test": "bun test",
+    "package": "bun run build && bun --bun vsce package --no-dependencies --out logbrew.vsix"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.4",
+    "@types/node": "26.6.5",
+    "@types/vscode": "1.101.0",
+    "@vscode/vsce": "4.1.1",
+    "ovsx": "1.4.0"
+  }
+}

@@ -1237,7 +1237,8 @@
     },
     {
       "files": [
-        "**/apps/raycast/**"
+        "**/apps/raycast/**",
+        "**/apps/vscode/**"
       ],
       "rules": {
         "eslint/no-duplicate-imports": [
@@ -1272,6 +1273,42 @@
       ],
       "rules": {
         "import/unambiguous": "off"
+      }
+    },
+    {
+      "files": [
+        "**/apps/vscode/src/**"
+      ],
+      "rules": {
+        "typescript/prefer-readonly-parameter-types": [
+          "error",
+          {
+            "allow": [
+              {
+                "from": "package",
+                "name": [
+                  "CancellationToken",
+                  "ConfigurationChangeEvent",
+                  "EventEmitter",
+                  "ExtensionContext",
+                  "Progress",
+                  "SecretStorage",
+                  "TreeView",
+                  "WorkspaceFolder"
+                ],
+                "package": "@types/vscode"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "**/apps/vscode/src/views.ts"
+      ],
+      "rules": {
+        "unicorn/prefer-event-target": "off"
       }
     }
   ]

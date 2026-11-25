@@ -1,0 +1,11 @@
+{
+  "extends": "../../js/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2024"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "paths": { "@logbrew/raycast/*": ["../raycast/src/*"] },
+    "types": ["bun", "node", "vscode"]
+  },
+  "include": ["src/**/*"]
+}
