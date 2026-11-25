@@ -1,9 +1,11 @@
+type Query = Readonly<Record<string, string>>;
+
 type Request = Readonly<{
   body?: Readonly<Record<string, unknown>>;
   credential: "apiToken" | "ingestKey";
   method: "GET" | "PATCH" | "POST";
   path: string;
-  query?: Readonly<Record<string, string>>;
+  query?: Query;
 }>;
 
 type Reply = Readonly<{ body: unknown; status: number }>;
@@ -40,6 +42,10 @@ type Alert = Readonly<{
 
 type Poll<Item> = Readonly<{ cursor: string; items: readonly Item[] }>;
 
+type IssuePage = Readonly<{ issues: readonly Issue[]; next: Query | undefined }>;
+
+type IssueRead = Readonly<{ apiUrl: string; filter: Query; pages: number }>;
+
 type Level = "critical" | "debug" | "error" | "info" | "warning";
 
 type Log = Readonly<{
@@ -56,6 +62,10 @@ type Log = Readonly<{
 
 const defaultApiUrl = "https://api.logbrew.co";
 const issueLimit = "500";
+const issueListVersion = "7";
+const issueVersion = "5";
+const onePage = 1;
+const pollPages = 20;
 const okStatus = 200;
 const noHttpStatus = 0;
 const missingCount = 0;
@@ -191,10 +201,25 @@ async function listProjects(send: Send): Promise<readonly Readonly<{ id: string;
   );
 }
 
-async function readIssues(send: Send, apiUrl: string, query: Readonly<Record<string, string>>): Promise<readonly Issue[]> {
+function issuePage(body: unknown, dashboard: string): IssuePage {
+  const page = isFields(body) ? body : {};
+  const next = page["next_cursor"];
+  return {
+    issues: compact(listOf(page["issues"]).map((value) => parseIssue(value, dashboard))),
+    next: isFields(next) ? { cursor_id: text(next, "id"), cursor_time: text(next, "time") } : undefined,
+  };
+}
+
+async function readIssues(send: Send, read: IssueRead): Promise<readonly Issue[]> {
+  const { apiUrl, filter, pages } = read;
+  const query = { limit: issueLimit, pagination: "cursor", response_version: issueListVersion, ...filter };
   const body = await call(send, { credential: "apiToken", method: "GET", path: "/api/telemetry/issues", query });
-  const dashboard = dashboardOrigin(apiUrl);
-  return compact(listOf(body).map((value) => parseIssue(value, dashboard)));
+  const page = issuePage(body, dashboardOrigin(apiUrl));
+  if (page.next === undefined || pages <= onePage) {
+    return page.issues;
+  }
+  const rest = await readIssues(send, { apiUrl, filter: { ...filter, ...page.next }, pages: pages - onePage });
+  return [...page.issues, ...rest];
 }
 
 async function pollNewIssues(
@@ -202,12 +227,12 @@ async function pollNewIssues(
   where: Readonly<{ apiUrl: string; cursor: string; projectId: string }>,
 ): Promise<Poll<Issue>> {
   const { apiUrl, cursor, projectId } = where;
-  const issues = await readIssues(send, apiUrl, { limit: issueLimit, project_id: projectId, since: cursor });
+  const issues = await readIssues(send, { apiUrl, filter: { project_id: projectId, since: cursor }, pages: pollPages });
   return newerThan(issues, cursor, (issue) => issue.first_seen_at);
 }
 
 async function latestIssue(send: Send, apiUrl: string, projectId: string): Promise<readonly Issue[]> {
-  const issues = await readIssues(send, apiUrl, { limit: issueLimit, project_id: projectId });
+  const issues = await readIssues(send, { apiUrl, filter: { project_id: projectId }, pages: onePage });
   return newest(issues, (issue) => issue.first_seen_at);
 }
 
@@ -234,7 +259,7 @@ async function resolveIssue(send: Send, apiUrl: string, issueId: string): Promis
     credential: "apiToken",
     method: "PATCH",
     path,
-    query: { response_version: "5" },
+    query: { response_version: issueVersion },
   });
   const issue = parseIssue(body, dashboardOrigin(apiUrl));
   if (issue === undefined) {

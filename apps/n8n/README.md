@@ -19,7 +19,7 @@ The LogBrew node also works as a tool for the n8n AI Agent node.
 
 ## Credentials
 
-1. In LogBrew, open **Settings**, then **API Tokens**, and create a token with **Projects** read, **Telemetry** read & write, and **Alerts** read access.
+1. On the [API page](https://logbrew.co/account/api) of your LogBrew account, create a token. Under **Access**, choose **Read** for **Projects**, **Read & Write** for **Issues, logs & traces**, and **Read** for **Alert rules**. The **Scopes** list then shows `projects:read`, `telemetry:read`, `issues:write`, and `alerts:read`. Resolve an Issue needs `issues:write`; if you do not resolve issues, choose **Read** for **Issues, logs & traces**.
 2. To send logs, open **API Keys** in your LogBrew project and create an ingest key.
 3. In n8n, create a **LogBrew API** credential. Paste the API token, and the ingest key if you send logs.
 

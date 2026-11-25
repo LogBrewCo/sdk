@@ -16,7 +16,7 @@ class LogBrewApi {
     {
       default: "",
       description:
-        "Create one in LogBrew under Settings, API Tokens, with Projects read, Telemetry read & write, and Alerts read access",
+        "Create one at logbrew.co/account/api with the scopes projects:read, telemetry:read, issues:write, and alerts:read",
       displayName: "API Token",
       name: "apiToken",
       required: true,
