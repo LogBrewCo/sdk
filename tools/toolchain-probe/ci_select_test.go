@@ -66,6 +66,7 @@ func TestCISelectAreas(t *testing.T) {
 		"apps/zapier/src/api.ts":                                     {"javascript"},
 		"scripts/jsr_publish.sh":                                     {"javascript"},
 		"tools/jsr-publish/bun.lock":                                 {"javascript"},
+		"apps/n8n/nodes/LogBrew/client.ts":                           {"javascript"},
 		"js/logbrew-react-native/README.md":                          {"javascript"},
 		"js/logbrew-react-native/src/NativeStore.ts":                 {"javascript", "react_native_native"},
 		"js/logbrew-react-native/persistent-delivery.native.js":      {"javascript", "react_native_native"},

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "types": ["node"],
+    "verbatimModuleSyntax": false
+  },
+  "include": ["credentials/**/*", "nodes/**/*"]
+}

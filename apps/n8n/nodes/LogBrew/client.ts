@@ -1,0 +1,298 @@
+type Request = Readonly<{
+  body?: Readonly<Record<string, unknown>>;
+  credential: "apiToken" | "ingestKey";
+  method: "GET" | "PATCH" | "POST";
+  path: string;
+  query?: Readonly<Record<string, string>>;
+}>;
+
+type Reply = Readonly<{ body: unknown; status: number }>;
+
+type Send = (request: Request) => Promise<Reply>;
+
+type Fields = Readonly<Record<string, unknown>>;
+
+type Issue = Readonly<{
+  environment: string;
+  first_seen_at: string;
+  id: string;
+  last_seen_at: string;
+  message: string;
+  occurrence_count: number;
+  project_id: string;
+  release: string;
+  service_name: string;
+  severity: string;
+  status: string;
+  title: string;
+  url: string;
+}>;
+
+type Alert = Readonly<{
+  environment: string;
+  id: string;
+  kind: string;
+  last_fired_at: string;
+  name: string;
+  project_id: string;
+  service: string;
+}>;
+
+type Poll<Item> = Readonly<{ cursor: string; items: readonly Item[] }>;
+
+type Level = "critical" | "debug" | "error" | "info" | "warning";
+
+type Log = Readonly<{
+  attributes: Fields;
+  environment: string;
+  id: string;
+  level: Level;
+  message: string;
+  occurredAt: string;
+  projectId: string;
+  release: string;
+  serviceName: string;
+}>;
+
+const defaultApiUrl = "https://api.logbrew.co";
+const issueLimit = "500";
+const okStatus = 200;
+const noHttpStatus = 0;
+const missingCount = 0;
+const sdkName = "n8n-nodes-logbrew";
+const sdkVersion = "0.1.0";
+const levels: readonly Level[] = ["debug", "info", "warning", "error", "critical"];
+
+class LogBrewError extends Error {
+  public readonly status: number;
+
+  public constructor(status: number, message: string) {
+    super(message);
+    this.name = "LogBrewError";
+    this.status = status;
+  }
+}
+
+function isFields(value: unknown): value is Fields {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function text(fields: Fields, key: string): string {
+  const value = fields[key];
+  return typeof value === "string" ? value : "";
+}
+
+function failure(reply: Reply): LogBrewError {
+  const body = isFields(reply.body) ? reply.body : {};
+  const detail =
+    [text(body, "error"), text(body, "next")].filter((part) => part !== "").join(". ") ||
+    "LogBrew did not accept the request";
+  return new LogBrewError(reply.status, `${detail} (HTTP ${String(reply.status)})`);
+}
+
+async function call(send: Send, request: Request): Promise<unknown> {
+  const reply = await send(request);
+  if (reply.status !== okStatus) {
+    throw failure(reply);
+  }
+  return reply.body;
+}
+
+function listOf(body: unknown): readonly unknown[] {
+  if (!Array.isArray(body)) {
+    throw new LogBrewError(okStatus, "LogBrew sent a list in an unknown format");
+  }
+  return body;
+}
+
+function dashboardOrigin(apiUrl: string): string {
+  const url = new URL(apiUrl);
+  const host = url.host.startsWith("api.") ? url.host.slice("api.".length) : url.host;
+  return `${url.protocol}//${host}`;
+}
+
+function parseIssue(value: unknown, dashboard: string): Issue | undefined {
+  if (!isFields(value)) {
+    return undefined;
+  }
+  const id = text(value, "id");
+  const firstSeenAt = text(value, "first_seen_at");
+  if (id === "" || Number.isNaN(Date.parse(firstSeenAt))) {
+    return undefined;
+  }
+  const { triage } = value;
+  const effective = isFields(triage) ? text(triage, "effective_severity") : "";
+  const count = value["occurrence_count"];
+  return {
+    environment: text(value, "environment"),
+    first_seen_at: firstSeenAt,
+    id,
+    last_seen_at: text(value, "last_seen_at"),
+    message: text(value, "message"),
+    occurrence_count: typeof count === "number" ? count : missingCount,
+    project_id: text(value, "project_id"),
+    release: text(value, "release"),
+    service_name: text(value, "service_name"),
+    severity: effective === "" ? text(value, "severity") : effective,
+    status: text(value, "status"),
+    title: text(value, "title"),
+    url: `${dashboard}/dashboard/issues/${encodeURIComponent(id)}`,
+  };
+}
+
+function parseAlert(value: unknown): Alert | undefined {
+  if (!isFields(value)) {
+    return undefined;
+  }
+  const id = text(value, "id");
+  const lastFiredAt = text(value, "last_fired_at");
+  if (id === "" || Number.isNaN(Date.parse(lastFiredAt))) {
+    return undefined;
+  }
+  return {
+    environment: text(value, "environment"),
+    id,
+    kind: text(value, "kind"),
+    last_fired_at: lastFiredAt,
+    name: text(value, "name"),
+    project_id: text(value, "project_id"),
+    service: text(value, "service"),
+  };
+}
+
+function compact<Item>(items: readonly (Item | undefined)[]): readonly Item[] {
+  return items.filter((item): item is Item => item !== undefined);
+}
+
+function newerThan<Item>(items: readonly Item[], cursor: string, at: (item: Item) => string): Poll<Item> {
+  const since = Date.parse(cursor);
+  const fresh = items
+    .filter((item) => Date.parse(at(item)) > since)
+    .toSorted((left, right) => Date.parse(at(left)) - Date.parse(at(right)));
+  const [last] = fresh.toReversed();
+  return { cursor: last === undefined ? cursor : at(last), items: fresh };
+}
+
+function newest<Item>(items: readonly Item[], at: (item: Item) => string): readonly Item[] {
+  const [first] = items.toSorted((left, right) => Date.parse(at(right)) - Date.parse(at(left)));
+  return first === undefined ? [] : [first];
+}
+
+async function listProjects(send: Send): Promise<readonly Readonly<{ id: string; name: string }>[]> {
+  const body = await call(send, { credential: "apiToken", method: "GET", path: "/api/projects" });
+  return compact(
+    listOf(body).map((value) => {
+      if (!isFields(value) || value["is_active"] === false) {
+        return undefined;
+      }
+      const project = { id: text(value, "id"), name: text(value, "name") };
+      return project.id === "" ? undefined : project;
+    }),
+  );
+}
+
+async function readIssues(send: Send, apiUrl: string, query: Readonly<Record<string, string>>): Promise<readonly Issue[]> {
+  const body = await call(send, { credential: "apiToken", method: "GET", path: "/api/telemetry/issues", query });
+  const dashboard = dashboardOrigin(apiUrl);
+  return compact(listOf(body).map((value) => parseIssue(value, dashboard)));
+}
+
+async function pollNewIssues(
+  send: Send,
+  where: Readonly<{ apiUrl: string; cursor: string; projectId: string }>,
+): Promise<Poll<Issue>> {
+  const { apiUrl, cursor, projectId } = where;
+  const issues = await readIssues(send, apiUrl, { limit: issueLimit, project_id: projectId, since: cursor });
+  return newerThan(issues, cursor, (issue) => issue.first_seen_at);
+}
+
+async function latestIssue(send: Send, apiUrl: string, projectId: string): Promise<readonly Issue[]> {
+  const issues = await readIssues(send, apiUrl, { limit: issueLimit, project_id: projectId });
+  return newest(issues, (issue) => issue.first_seen_at);
+}
+
+async function readAlerts(send: Send, projectId: string): Promise<readonly Alert[]> {
+  const path = `/api/projects/${encodeURIComponent(projectId)}/alert-rules`;
+  const body = await call(send, { credential: "apiToken", method: "GET", path });
+  const rules = isFields(body) ? body["rules"] : undefined;
+  return compact(listOf(rules).map((value) => parseAlert(value)));
+}
+
+async function pollFiredAlerts(send: Send, projectId: string, cursor: string): Promise<Poll<Alert>> {
+  const alerts = await readAlerts(send, projectId);
+  return newerThan(alerts, cursor, (alert) => alert.last_fired_at);
+}
+
+async function latestAlert(send: Send, projectId: string): Promise<readonly Alert[]> {
+  return newest(await readAlerts(send, projectId), (alert) => alert.last_fired_at);
+}
+
+async function resolveIssue(send: Send, apiUrl: string, issueId: string): Promise<Issue> {
+  const path = `/api/telemetry/issues/${encodeURIComponent(issueId)}`;
+  const body = await call(send, {
+    body: { status: "resolved" },
+    credential: "apiToken",
+    method: "PATCH",
+    path,
+    query: { response_version: "5" },
+  });
+  const issue = parseIssue(body, dashboardOrigin(apiUrl));
+  if (issue === undefined) {
+    throw new LogBrewError(okStatus, "LogBrew sent an issue in an unknown format");
+  }
+  return issue;
+}
+
+async function sendLog(send: Send, log: Log): Promise<unknown> {
+  const body = {
+    environment: log.environment,
+    items: [
+      {
+        data: {
+          attributes: log.attributes,
+          id: log.id,
+          level: log.level,
+          message: log.message,
+          occurred_at: log.occurredAt,
+          source: "n8n",
+        },
+        type: "log",
+      },
+    ],
+    project_id: log.projectId,
+    release: log.release,
+    sdk_name: sdkName,
+    sdk_version: sdkVersion,
+    service_name: log.serviceName,
+  };
+  return call(send, { body, credential: "ingestKey", method: "POST", path: "/api/telemetry/ingest" });
+}
+
+function levelOf(value: string): Level {
+  const level = levels.find((known) => known === value);
+  if (level === undefined) {
+    throw new LogBrewError(noHttpStatus, `Unknown log level "${value}". Use debug, info, warning, error, or critical.`);
+  }
+  return level;
+}
+
+export {
+  type Alert,
+  type Issue,
+  type Log,
+  type Poll,
+  type Reply,
+  type Request,
+  type Send,
+  LogBrewError,
+  defaultApiUrl,
+  latestAlert,
+  latestIssue,
+  levelOf,
+  listProjects,
+  noHttpStatus,
+  pollFiredAlerts,
+  pollNewIssues,
+  resolveIssue,
+  sendLog,
+};
