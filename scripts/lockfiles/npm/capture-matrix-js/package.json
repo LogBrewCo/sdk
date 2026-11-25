@@ -6,7 +6,7 @@
     "@angular/compiler": "22.2.6",
     "@angular/core": "22.2.6",
     "@angular/platform-browser": "22.2.6",
-    "@aws-sdk/client-sqs": "3.1170.0",
+    "@aws-sdk/client-sqs": "3.1171.0",
     "@nestjs/common": "12.5.1",
     "@nestjs/core": "12.5.1",
     "@nestjs/platform-express": "12.5.1",
@@ -28,7 +28,7 @@
     "react-router": "8.5.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "svelte": "5.57.3",
+    "svelte": "5.58.0",
     "vue": "3.5.45"
   },
   "overrides": {
