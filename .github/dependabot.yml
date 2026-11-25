@@ -3,6 +3,15 @@
 # pulls or replaces within a week never lands. Security updates do not wait.
 # scripts/check-dependabot.sh fails when a tracked manifest has no entry here.
 version: 2
+# The uv updater fetches lockfile hashes once for each job credential. Without a
+# python-index registry, the github.com git credential becomes an empty index URL
+# and the fetch fails (dependabot/dependabot-core#12260). A registry that replaces
+# the base index leaves only PyPI in that list.
+registries:
+  pypi:
+    type: python-index
+    url: https://pypi.org/simple
+    replaces-base: true
 updates:
   - package-ecosystem: github-actions
     directories:
@@ -274,6 +283,8 @@ updates:
   - package-ecosystem: uv
     directories:
       - /scripts/lockfiles/python
+    registries:
+      - pypi
     schedule:
       interval: daily
     cooldown:
