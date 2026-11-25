@@ -1,0 +1,11 @@
+{
+  "name": "@logbrew/browser",
+  "license": "MIT",
+  "exports": "./index.js",
+  "imports": {
+    "@logbrew/sdk": "npm:@logbrew/sdk@^0.1.48"
+  },
+  "publish": {
+    "exclude": ["examples", "test"]
+  }
+}

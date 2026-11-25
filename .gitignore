@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 
 /target/
+tools/jsr-publish/node_modules/
 tools/npm-publish/node_modules/
 Cargo.lock
 python/logbrew_py/build/

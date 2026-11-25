@@ -170,6 +170,10 @@ jobs:
         if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
         run: bash scripts/check_js_lint.sh
 
+      - name: Check the JSR packages
+        if: ${{ needs.changed-areas.outputs.javascript == 'true' }}
+        run: bash scripts/jsr_publish.sh check
+
       - name: Set up Rust
         if: ${{ needs.changed-areas.outputs.rust == 'true' }}
         run: |
