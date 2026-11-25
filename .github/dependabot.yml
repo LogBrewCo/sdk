@@ -36,6 +36,7 @@ updates:
         patterns: ["*"]
   - package-ecosystem: bun
     directories:
+      - /apps/n8n
       - /apps/raycast
       - /apps/vscode
       - /apps/zapier

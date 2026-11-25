@@ -1269,6 +1269,82 @@
     },
     {
       "files": [
+        "**/apps/n8n/**"
+      ],
+      "rules": {
+        "eslint/no-duplicate-imports": [
+          "error",
+          {
+            "allowSeparateTypeImports": true
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "**/apps/n8n/eslint.config.mjs"
+      ],
+      "rules": {
+        "import/no-default-export": "off",
+        "unicorn/prefer-export-from": "off"
+      }
+    },
+    {
+      "files": [
+        "**/apps/n8n/credentials/*.credentials.ts",
+        "**/apps/n8n/nodes/*/*.node.ts"
+      ],
+      "rules": {
+        "unicorn/filename-case": "off"
+      }
+    },
+    {
+      "files": [
+        "**/apps/n8n/nodes/*/*.node.ts"
+      ],
+      "rules": {
+        "eslint/sort-keys": "off"
+      }
+    },
+    {
+      "files": [
+        "**/apps/n8n/test/*.ts"
+      ],
+      "globals": {
+        "Bun": "readonly",
+        "afterAll": "readonly",
+        "expect": "readonly",
+        "test": "readonly"
+      }
+    },
+    {
+      "files": [
+        "**/apps/n8n/nodes/LogBrewTrigger/*.ts",
+        "**/apps/n8n/test/*.ts"
+      ],
+      "rules": {
+        "import/no-relative-parent-imports": "off"
+      }
+    },
+    {
+      "files": [
+        "**/apps/n8n/nodes/LogBrewTrigger/LogBrewTrigger.node.ts",
+        "**/apps/n8n/test/fixture.ts"
+      ],
+      "rules": {
+        "unicorn/no-null": "off"
+      }
+    },
+    {
+      "files": [
+        "**/apps/n8n/nodes/LogBrew/LogBrew.node.ts"
+      ],
+      "rules": {
+        "eslint/no-await-in-loop": "off"
+      }
+    },
+    {
+      "files": [
         "**/apps/raycast/raycast-eslint-config.d.ts"
       ],
       "rules": {
