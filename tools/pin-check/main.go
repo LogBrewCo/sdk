@@ -2,7 +2,10 @@
 // installs a dependency that the OpenSSF Scorecard Pinned-Dependencies check
 // reports as unpinned, unless quality/unpinned-installs.tsv lists that command
 // with the reason it stays unpinned. It also fails when a listed command no
-// longer exists, so the list cannot go stale.
+// longer exists, so the list cannot go stale. It skips files under a
+// node_modules folder: those belong to installed packages, which the checks
+// install before this one runs, and Scorecard never sees them in the
+// repository.
 //
 // Usage: go -C tools/pin-check run . [REPOSITORY_ROOT]
 package main
@@ -114,17 +117,36 @@ func scan(root string) ([]checker.Dependency, int, error) {
 	if len(data.ProcessingErrors) > 0 {
 		var errs []error
 		for _, e := range data.ProcessingErrors {
-			errs = append(errs, fmt.Errorf("%s: %w", e.Location.Path, e.Err))
+			if !installed(e.Location.Path) {
+				errs = append(errs, fmt.Errorf("%s: %w", e.Location.Path, e.Err))
+			}
 		}
-		return nil, 0, errors.Join(errs...)
+		if len(errs) > 0 {
+			return nil, 0, errors.Join(errs...)
+		}
 	}
 	var unpinned []checker.Dependency
+	total := 0
 	for _, dep := range data.Dependencies {
+		if dep.Location != nil && installed(dep.Location.Path) {
+			continue
+		}
+		total++
 		if dep.Pinned != nil && !*dep.Pinned && dep.Location != nil {
 			unpinned = append(unpinned, dep)
 		}
 	}
-	return unpinned, len(data.Dependencies), nil
+	return unpinned, total, nil
+}
+
+// installed reports whether path lies in a node_modules folder.
+func installed(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == "node_modules" {
+			return true
+		}
+	}
+	return false
 }
 
 // readAllowlist reads `path<TAB>command<TAB>reason` rows; # starts a comment.

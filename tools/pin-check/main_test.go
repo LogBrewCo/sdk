@@ -65,6 +65,25 @@ func TestRun(t *testing.T) {
 	}
 }
 
+func TestRunSkipsInstalledPackages(t *testing.T) {
+	root := repository(t, ".github/workflows/test.yml\tnpm install left-pad\treason\n")
+	path := filepath.Join(root, "apps/n8n/node_modules/cpu-features/Dockerfile")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("FROM ubuntu:latest\nRUN npm install left-pad\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code, err := run(root, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 || !strings.Contains(stdout.String(), "1 installs pinned, 1 listed") {
+		t.Fatalf("code = %d, output %q; stderr: %s", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestReadAllowlistRejectsBadRows(t *testing.T) {
 	for _, text := range []string{"path\tcommand\n", "path\tcommand\t \n", "a\tb\tc\na\tb\tc\n"} {
 		path := filepath.Join(t.TempDir(), "list.tsv")
