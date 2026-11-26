@@ -5,7 +5,7 @@
 # published file or a published manifest field without a new version, and
 # passes for README, example, tsconfig, and scripts changes. Proves that a
 # package that publishes a built dist needs a new version for a source change
-# but not for a README or test change. Proves that
+# but not for a README, test, or osv-scanner.toml change. Proves that
 # waves publishes a package after the workspace peers it needs, and that
 # scripts/jsr_publish.sh publish-all publishes each package that has a jsr.json
 # at the version its package.json gives npm.
@@ -67,6 +67,7 @@ change "peer range without a version" fail 'jq ".peerDependencies.express = \">=
 change "code with a version" pass 'echo "// fix" >>js/logbrew-core/index.cjs && jq ".version = \"1.0.1\"" js/logbrew-core/package.json >m && mv m js/logbrew-core/package.json'
 change "built package README only" pass 'echo more >>apps/n8n/README.md'
 change "built package test only" pass 'echo "// more" >>apps/n8n/test/node.test.ts'
+change "built package advisory exceptions only" pass 'printf "[[IgnoredVulns]]\nid = \"GHSA-0000-0000-0000\"\n" >apps/n8n/osv-scanner.toml && git add apps/n8n/osv-scanner.toml'
 change "built package scripts only" pass 'jq ".scripts.lint = \"true\"" apps/n8n/package.json >m && mv m apps/n8n/package.json'
 change "built package source without a version" fail 'echo "// fix" >>apps/n8n/nodes/node.ts' \
     'n8n-nodes-logbrew changed its published files but keeps version 0.1.0'
