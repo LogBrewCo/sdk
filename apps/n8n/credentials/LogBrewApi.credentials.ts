@@ -1,18 +1,20 @@
-class LogBrewApi {
-  public readonly authenticate = {
+import type { IAuthenticateGeneric, Icon, ICredentialTestRequest, ICredentialType, INodeProperties } from "n8n-workflow";
+
+class LogBrewApi implements ICredentialType {
+  public readonly authenticate: IAuthenticateGeneric = {
     properties: { headers: { Authorization: "=Bearer {{$credentials.apiToken}}" } },
     type: "generic",
-  } as const;
+  };
 
   public readonly displayName = "LogBrew API";
 
   public readonly documentationUrl = "https://github.com/LogBrewCo/sdk/tree/main/apps/n8n#credentials";
 
-  public readonly icon = { dark: "file:../icons/logbrew.dark.svg", light: "file:../icons/logbrew.svg" } as const;
+  public readonly icon: Icon = { dark: "file:../icons/logbrew.dark.svg", light: "file:../icons/logbrew.svg" };
 
   public readonly name = "logBrewApi";
 
-  public readonly properties = [
+  public readonly properties: INodeProperties[] = [
     {
       default: "",
       description:
@@ -28,7 +30,7 @@ class LogBrewApi {
       description:
         "Only Send Log needs it. Create an ingest key under API Keys in your LogBrew project.",
       displayName: "Ingest Key",
-      name: "ingestKey",
+      name: "ingestApiKey",
       type: "string",
       typeOptions: { password: true },
     },
@@ -39,11 +41,11 @@ class LogBrewApi {
       name: "apiUrl",
       type: "string",
     },
-  ] as const;
+  ];
 
-  public readonly test = {
+  public readonly test: ICredentialTestRequest = {
     request: { baseURL: "={{$credentials.apiUrl}}", url: "/api/projects" },
-  } as const;
+  };
 }
 
 export { LogBrewApi };

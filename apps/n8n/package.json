@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-logbrew",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "LogBrew nodes for n8n. Start workflows on new issues and fired alerts, send logs, and resolve issues.",
   "license": "MIT",
   "homepage": "https://logbrew.co",
@@ -44,6 +44,7 @@
     "@types/bun": "1.4.4",
     "@types/node": "26.6.10",
     "eslint": "10.15.0",
+    "n8n-workflow": "2.49.5",
     "typescript": "npm:@typescript/typescript6@6.0.2"
   },
   "peerDependencies": {

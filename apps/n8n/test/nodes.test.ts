@@ -47,7 +47,7 @@ async function fetchReply(options: Options): Promise<Readonly<{ body: unknown; s
 }
 
 function context(setup: Setup): Fields {
-  const credentials = { apiToken, apiUrl: fixture.url, ingestKey, ...setup.credentials };
+  const credentials = { apiToken, apiUrl: fixture.url, ingestApiKey: ingestKey, ...setup.credentials };
   const state = setup.state ?? {};
   return {
     continueOnFail: () => setup.continueOnFail === true,
@@ -56,7 +56,8 @@ function context(setup: Setup): Fields {
     getMode: () => setup.mode ?? "trigger",
     getNodeParameter: (name: string, ...rest: readonly unknown[]) => {
       const [fallback] = rest.toReversed();
-      return setup.parameters[name] ?? fallback;
+      const value: unknown = name.split(".").reduce<unknown>((parent, key) => fieldsOf(parent)[key], setup.parameters);
+      return value ?? fallback;
     },
     getWorkflowStaticData: () => state,
     helpers: {
@@ -198,7 +199,7 @@ test("trigger reports a rejected API token with LogBrew's message", async () => 
 test("node sends a log with the ingest key", async () => {
   const result = await run(new LogBrew(), "execute", {
     parameters: {
-      attributes: '{ "order_id": "A-1001" }',
+      additionalFields: { attributes: '{ "order_id": "A-1001" }' },
       environment: "staging",
       level: "warning",
       message: "Order sync retried",
@@ -222,7 +223,7 @@ test("node sends a log with the ingest key", async () => {
       project_id: projectId,
       release: "workflow",
       sdk_name: "n8n-nodes-logbrew",
-      sdk_version: "0.1.0",
+      sdk_version: "0.1.2",
       service_name: "n8n",
     },
     log: {
@@ -239,7 +240,7 @@ test("node sends a log with the ingest key", async () => {
 
 test("node asks for an ingest key before it sends a log", async () => {
   const setup = {
-    credentials: { ingestKey: "" },
+    credentials: { ingestApiKey: "" },
     parameters: { level: "info", message: "hello", operation: "send", projectId, resource: "log" },
   };
   expect(await failureOf(new LogBrew(), "execute", setup)).toBe(
