@@ -7,9 +7,9 @@ import type {
   INodeType,
   INodeTypeDescription,
 } from "n8n-workflow";
-import { NodeConnectionTypes } from "n8n-workflow";
 import { connect, projectOptions } from "./transport";
 import { levelOf, resolveIssue, sendLog } from "./client";
+import { NodeConnectionTypes } from "n8n-workflow";
 import type { Send } from "./client";
 
 type Connection = Readonly<{ apiUrl: string; send: Send }>;

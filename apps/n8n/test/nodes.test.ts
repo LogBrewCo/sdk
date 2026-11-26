@@ -56,7 +56,10 @@ function context(setup: Setup): Fields {
     getMode: () => setup.mode ?? "trigger",
     getNodeParameter: (name: string, ...rest: readonly unknown[]) => {
       const [fallback] = rest.toReversed();
-      const value: unknown = name.split(".").reduce<unknown>((parent, key) => fieldsOf(parent)[key], setup.parameters);
+      let value: unknown = setup.parameters;
+      for (const key of name.split(".")) {
+        value = fieldsOf(value)[key];
+      }
       return value ?? fallback;
     },
     getWorkflowStaticData: () => state,

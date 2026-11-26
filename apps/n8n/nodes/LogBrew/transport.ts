@@ -1,5 +1,4 @@
 import type {
-  ICredentialDataDecryptedObject,
   IExecuteFunctions,
   IHttpRequestOptions,
   ILoadOptionsFunctions,
@@ -15,7 +14,7 @@ type Context = IExecuteFunctions | ILoadOptionsFunctions | IPollFunctions;
 
 const credentialName = "logBrewApi";
 
-function setting(credentials: ICredentialDataDecryptedObject, key: string): string {
+function setting(credentials: Readonly<Record<string, unknown>>, key: string): string {
   const value = credentials[key];
   return typeof value === "string" ? value.trim() : "";
 }
