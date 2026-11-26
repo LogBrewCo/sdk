@@ -35,17 +35,6 @@ Keep the API URL `https://api.logbrew.co`. Change it only when your team runs Lo
 
 The nodes show the LogBrew error and its next step, for example `Invalid or expired token. send Authorization: Bearer <token> (HTTP 401)`. Turn on **Continue On Fail** to keep the workflow running and get the error on the item.
 
-## Development
-
-```sh
-bun install
-bun run build
-bun test
-bun run lint
-```
-
-The tests run the nodes against a local LogBrew fixture server, with no account or network access.
-
 ## License
 
 MIT
