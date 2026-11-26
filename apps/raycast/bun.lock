@@ -5,7 +5,7 @@
     "": {
       "name": "logbrew",
       "dependencies": {
-        "@raycast/api": "2.12.1",
+        "@raycast/api": "2.13.1",
         "@raycast/utils": "2.3.3",
       },
       "devDependencies": {
@@ -151,7 +151,7 @@
 
     "@oclif/plugin-not-found": ["@oclif/plugin-not-found@4.0.7", "", { "dependencies": { "@inquirer/prompts": "^7.10.1", "@oclif/core": "^5.1.9", "ansis": "^3.17.0", "fast-levenshtein": "^3.0.0" } }, "sha512-i1SKG/rnCx/uy2YYzo3mthouiV5sFC+LXbudwRbjDgHEY87uSGPQG02kRYuge5s5XDmn0c8FOqzu6IVbx1aV5w=="],
 
-    "@raycast/api": ["@raycast/api@2.12.1", "", { "dependencies": { "@oclif/core": "^5.1.9", "@oclif/plugin-autocomplete": "^4.0.5", "@oclif/plugin-help": "^7.0.5", "@oclif/plugin-not-found": "^4.0.5", "@types/node": "26.6.5", "@types/react": "19.3.0", "clipboardy": "^5.3.2", "esbuild": "^0.28.2", "open": "^11.0.4", "react": "19.3.1" }, "peerDependencies": { "react-devtools": "8.0.0" }, "optionalPeers": ["react-devtools"], "bin": { "ray": "bin/run.js" } }, "sha512-vqYBJUtN+0JwS6grg8QwCVoFIMC6rjQfLBjbEdR6gJrzZ1kwb/2Tus34OpMkH5c7IstZAzmw5L+8FlknHYoxjg=="],
+    "@raycast/api": ["@raycast/api@2.13.1", "", { "dependencies": { "@oclif/core": "^5.1.9", "@oclif/plugin-autocomplete": "^4.0.5", "@oclif/plugin-help": "^7.0.5", "@oclif/plugin-not-found": "^4.0.5", "@types/node": "26.6.5", "@types/react": "19.3.0", "clipboardy": "^5.3.2", "esbuild": "^0.28.2", "open": "^11.0.4", "react": "19.3.1" }, "peerDependencies": { "react-devtools": "8.0.0" }, "optionalPeers": ["react-devtools"], "bin": { "ray": "bin/run.js" } }, "sha512-jlgadrs91RKLFfscvsJrDKWPqjFffN0o7xT2YK+23+fkxvKPfE9sqPPDvRYO6ZqcVZcrIC30lKeUipEUt1O6Og=="],
 
     "@raycast/eslint-config": ["@raycast/eslint-config@2.2.0", "", { "dependencies": { "@eslint/js": "^9.39.4", "@raycast/eslint-plugin": "^2.2.0", "eslint-config-prettier": "^10.1.8", "globals": "^17.7.0", "typescript-eslint": "^8.62.0" }, "peerDependencies": { "eslint": "^8.57.0 || ^9.0.0 || ^10.0.0", "prettier": ">=2", "typescript": ">=4.8.4 <6.1.0" } }, "sha512-uS/UDvM+3HfABgYhLYnIv0y+IVu+rGiZZIMwQsO5EGrcf2/TX/yioTzfezAQqhdszW4ViCuHbv8BddIagDKZvQ=="],
 
