@@ -470,7 +470,8 @@ js/logbrew-react-native/metadata.cjs	password	item	password
 
 # Expo's CLI depends on dnssd-advertise, whose name starts with a listed word.
 js/bun.lock	dns	has	"dnssd-advertise": "^
-{apps/raycast/bun.lock,apps/vscode/bun.lock,apps/zapier/bun.lock}	password	has	"@inquirer/password
+# @inquirer/password is a prompt package that the CLI tooling installs; Bun lock keys also nest it under other packages (@yeoman/adapter/@inquirer/prompts/@inquirer/password/...).
+{apps/raycast/bun.lock,apps/vscode/bun.lock,apps/zapier/bun.lock}	password	has	@inquirer/password
 # zapier-platform-core depends on @zapier/secret-scrubber, whose name holds a listed word.
 apps/zapier/bun.lock	secret	has	"@zapier/secret-scrubber": "^
 # The Raycast extension names the browser sign-in and session renewal fields of the LogBrew API, and refuses links that carry a user name or password.
