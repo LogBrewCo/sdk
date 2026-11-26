@@ -39,6 +39,8 @@ var (
 		"@logbrew/bullmq", "@logbrew/express", "@logbrew/fastify", "@logbrew/kafkajs", "@logbrew/nestjs",
 		"@logbrew/next", "@logbrew/node", "@logbrew/prisma", "@logbrew/react", "@logbrew/react-native",
 		"@logbrew/sdk", "@logbrew/svelte", "@logbrew/vue"}
+	// registryOwnNPM lists npm packages that release on their own versions, outside the SDK package set.
+	registryOwnNPM = []string{"n8n-nodes-logbrew"}
 	// registryPyPI lists the core package first, then the extras.
 	registryPyPI   = []string{"logbrew-sdk", "logbrew-fastapi", "logbrew-flask", "logbrew-django"}
 	registryMaven  = []string{"logbrew-sdk", "logbrew-kotlin", "logbrew-kotlin-okhttp"}
@@ -169,7 +171,7 @@ func (run *registryRun) parse(arguments []string, publicVersion string) (string,
 		return !slices.ContainsFunc(values, func(value string) bool { return !slices.Contains(choices, value) })
 	}
 	if flags.NArg() > 0 || parsed != [3]bool{true, true, true} || !retriesParsed ||
-		!inside(*lists["target"], registryTargets) || !inside(*lists["npm-package"], registryNPM) ||
+		!inside(*lists["target"], registryTargets) || !inside(*lists["npm-package"], slices.Concat(registryNPM, registryOwnNPM)) ||
 		!inside(*lists["maven-artifact"], registryMaven) || set["maven-plan-scope"] &&
 		!slices.Contains([]string{"selected", "dependencies"}, *scope) {
 		return "", errUsage
@@ -213,8 +215,8 @@ func (run *registryRun) parse(arguments []string, publicVersion string) (string,
 	}
 	for _, family := range []struct{ name, flag, label string }{{"npm", "npm-version", "npm"},
 		{"pypi", "pypi-version", "PyPI"}, {"nuget", "nuget-version", "NuGet"}, {"maven", "maven-version", "Maven"}} {
-		allowed := map[string][]string{"npm": append(slices.Clone(registryNPM), unityPackage), "pypi": registryPyPI,
-			"nuget": run.nugetIDs, "maven": mavenLabels}[family.name]
+		allowed := map[string][]string{"npm": slices.Concat(registryNPM, []string{unityPackage}, registryOwnNPM),
+			"pypi": registryPyPI, "nuget": run.nugetIDs, "maven": mavenLabels}[family.name]
 		run.versions[family.name] = map[string]string{}
 		for _, raw := range *lists[family.flag] {
 			name, value, found := strings.Cut(raw, "=")

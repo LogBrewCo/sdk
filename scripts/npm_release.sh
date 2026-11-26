@@ -12,14 +12,18 @@
 #
 # Published files are the manifest `files` entries other than README.md and
 # examples, and the manifest fields other than version and scripts. A change
-# to only a README, an example, a test, or a tsconfig needs no release.
+# to only a README, an example, a test, or a tsconfig needs no release. A
+# package that publishes a built `dist` publishes every file its directory
+# holds other than package.json, README.md, and test, because its build reads
+# them. publish skips a package that has no npm page yet, because npm trusted
+# publishing needs the first version of a package published by hand.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 package_dirs() {
     local manifest
-    for manifest in js/logbrew-*/package.json; do
+    for manifest in js/logbrew-*/package.json apps/n8n/package.json; do
         [[ "$(jq -r '.private // false' "$manifest")" == true ]] || dirname "$manifest"
     done
 }
@@ -35,8 +39,13 @@ check() {
         old="$(git show "$base:$dir/package.json" 2>/dev/null)" || continue
         [[ "$(jq -r .version <<<"$old")" == "$(jq -r .version "$dir/package.json")" ]] || continue
         paths=()
-        while read -r path; do paths+=("$dir/$path"); done < <(
-            jq -r '.files[] | select(. != "README.md" and . != "examples")' "$dir/package.json")
+        while read -r path; do
+            if [[ "$path" == dist ]]; then
+                paths+=("$dir" ":(exclude)$dir/package.json" ":(exclude)$dir/README.md" ":(exclude)$dir/test")
+            else
+                paths+=("$dir/$path")
+            fi
+        done < <(jq -r '.files[] | select(. != "README.md" and . != "examples")' "$dir/package.json")
         if git diff --quiet "$base" HEAD -- "${paths[@]}" &&
             [[ "$(published_manifest "$old")" == "$(published_manifest "$(cat "$dir/package.json")")" ]]; then
             continue
@@ -90,6 +99,10 @@ publish() {
     local dir name version pending=() wave runs id failed=0
     while read -r dir; do
         name="$(jq -r .name "$dir/package.json")" version="$(jq -r .version "$dir/package.json")"
+        if [[ "$(curl -sS -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/$name")" == 404 ]]; then
+            echo "::warning::$name has no npm page. Publish its first version by hand, then add its trusted publisher."
+            continue
+        fi
         curl -fsS -o /dev/null "https://registry.npmjs.org/$name/$version" 2>/dev/null || pending+=("$dir")
     done < <(package_dirs)
     ((${#pending[@]})) || { echo "npm has every package version"; return; }
