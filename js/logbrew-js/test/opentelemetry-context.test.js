@@ -106,6 +106,42 @@ await test("OpenTelemetry span helper duck-types span objects and validates chil
   );
 });
 
+const OPENTELEMETRY_API_REGISTRY = Symbol.for("opentelemetry.js.api.1");
+const OPENTELEMETRY_SPAN_KEY = Symbol.for("OpenTelemetry Context Key SPAN");
+
+const ACTIVE_SPAN = { spanContext: spanContextOf(TRACE_ID, PARENT_SPAN_ID, TRACE_FLAGS_SAMPLED) };
+
+/**
+ * @param {unknown} key
+ * @returns {unknown}
+ */
+function activeSpanValue(key) {
+  return key === OPENTELEMETRY_SPAN_KEY ? ACTIVE_SPAN : undefined;
+}
+
+/**
+ * @param {unknown} contextManager
+ * @returns {unknown}
+ */
+function currentTraceWithContextManager(contextManager) {
+  Reflect.set(globalThis, OPENTELEMETRY_API_REGISTRY, { context: contextManager });
+  try {
+    return logbrewTraceContextFromCurrentOpenTelemetrySpan({ spanId: CHILD_SPAN_ID });
+  } finally {
+    Reflect.deleteProperty(globalThis, OPENTELEMETRY_API_REGISTRY);
+  }
+}
+
+await test("OpenTelemetry current span helper reads the span an installed OpenTelemetry API made active", () => {
+  assert.equal(logbrewTraceContextFromCurrentOpenTelemetrySpan({ spanId: CHILD_SPAN_ID }), null);
+  assert.deepEqual(
+    currentTraceWithContextManager({ active: () => ({ getValue: activeSpanValue }) }),
+    { parentSpanId: PARENT_SPAN_ID, sampled: true, spanId: CHILD_SPAN_ID, traceId: TRACE_ID }
+  );
+  assert.equal(currentTraceWithContextManager({ active: () => ({ getValue: () => undefined }) }), null);
+  assert.equal(currentTraceWithContextManager({ active: () => { throw new Error("no context"); } }), null);
+});
+
 await test("OpenTelemetry current span helper uses explicit API seam and returns null for invalid contexts", () => {
   const trace = logbrewTraceContextFromCurrentOpenTelemetrySpan({
     openTelemetryApi: {

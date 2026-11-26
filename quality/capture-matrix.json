@@ -491,7 +491,7 @@
       },
       "method": "amqplib publish and consume through the documented amqplibSendToQueueWithLogBrewSpan and withLogBrewAmqplibConsumer, the publisher inside an active Node trace with a request user, and Pino capture from @logbrew/node; no RabbitMQ broker is installed, so the channel is an in-memory stand-in with the amqplib sendToQueue and consume shapes, as in the package's own examples; one message that succeeds and one whose consumer throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-amqplib",
-      "inputs": "3bb47f8c9ed1edabd19d1d8594eec2cf4ae3eab9babcf0862184684e3ae423f6"
+      "inputs": "5a7938adefc6dc167d9884ca59eac02e0be6fc94bd3082df59620244fc2c5126"
     },
     "js/logbrew-angular": {
       "share": 100.0,
@@ -519,7 +519,7 @@
       },
       "method": "Angular 22 standalone app bootstrapped with JIT and zoneless change detection under happy-dom, with provideLogBrew, which installs @logbrew/browser with its fetch transport, breadcrumbs, and request spans, its ErrorHandler, injectLogBrew, and console capture; one HttpClient call under tracePropagationTargets and a click handler that throws twice",
       "probe": "tools/capture-matrix/probes/js/logbrew-angular",
-      "inputs": "20190e533de7fae1759818918a1ec8381afa8b90a5818b5647ee57ef7c3d8c7b"
+      "inputs": "0505b1e94d84efc1ec9782d4b9aeaff49ed7f26cf1b8d32491901e64172b0145"
     },
     "js/logbrew-aws-sqs": {
       "share": 100.0,
@@ -549,7 +549,7 @@
       },
       "method": "Real @aws-sdk/client-sqs SQSClient instrumented with the documented instrumentLogBrewSqsClient and withLogBrewSqsMessageProcessor, the sender inside an active Node trace with a request user, and Pino capture from @logbrew/node; no SQS service is installed, so the client talks to a local HTTP stand-in for the SQS JSON protocol; one message that succeeds and one whose processor throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-aws-sqs",
-      "inputs": "ca044f4ad42a326f6472e08d804a058ec502c90ca32867ad3d2f2f4bd18ac9d0"
+      "inputs": "18a91bfb51c3d420ec73a6bced2a54d66355a37504f6e2ae14730c67860b275e"
     },
     "js/logbrew-browser": {
       "share": 100.0,
@@ -577,7 +577,7 @@
       },
       "method": "Browser page under happy-dom with installLogBrewBrowser and its fetch transport, the documented service, deployment, and subject context, fetch and SPA navigation instrumentation, and console capture; one API call that succeeds, one that fails, and a click handler that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-browser",
-      "inputs": "0588f7ebb2553dd590de0f8eab65db5b9b4ef5ac8f115cda2714750ac6b0e996"
+      "inputs": "3ec124fc2c949d660c79ffbf1e3e709057cf810911c7d61a2022842db6a0da36"
     },
     "js/logbrew-bullmq": {
       "share": 100.0,
@@ -607,7 +607,7 @@
       },
       "method": "BullMQ 6 queue and worker on a local redis-server, with the documented queue instrumentation and wrapped processor, the producer inside an active Node trace with a request user, and BullMQ's job.log; one job that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-bullmq",
-      "inputs": "33e15bfbf79d497b9a9080e42e9f90e81fe5cc2ae97e8c4d916685679da040e8"
+      "inputs": "a768b3795c278ffec7fa5531b792d09cbd5678e5c4a33c3b242121671bac0f6c"
     },
     "js/logbrew-express": {
       "share": 100.0,
@@ -637,7 +637,7 @@
       },
       "method": "Express 5 app with the documented middleware, error handler, request user, and Pino capture; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-express",
-      "inputs": "5bb26789d04f8a0efb299163fb26033fc234ab2b12937726ae10544492bc5b7d"
+      "inputs": "b11ee0817bf42b797e590c6abaebd056874764b34ba166ab4bdeb3906f0a427e"
     },
     "js/logbrew-fastify": {
       "share": 90.9,
@@ -669,7 +669,7 @@
       },
       "method": "Fastify 5 app with the documented plugin, application-log capture through Fastify's Pino logger, request metrics, and the Node request user; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-fastify",
-      "inputs": "9e4d70654f412342b81e91ee227a0afd682054e7004f06525b7b03741a71fb72"
+      "inputs": "d7f4f7a6e4c12e988201d92b0dcc398c2e6d39ecf7150b274ef642a58477ff12"
     },
     "js/logbrew-js": {
       "share": 91.7,
@@ -699,7 +699,7 @@
       },
       "method": "LogBrewClient with an app-owned fetch transport, the documented telemetry context, console capture, a W3C trace, and an issue built from a thrown Error; the core has no framework hooks, so its documented API is the capture path",
       "probe": "tools/capture-matrix/probes/js/logbrew-js",
-      "inputs": "eb483793577b69b97aa0211ae93720a40dd5a4d81cd94ea51ffe73e3f53c4809"
+      "inputs": "c9f0b25e378e98ad9c50b80cfdda3bdc62f267a2fdc6ae98647fe80100070eba"
     },
     "js/logbrew-kafkajs": {
       "share": 100.0,
@@ -729,7 +729,7 @@
       },
       "method": "KafkaJS producer and consumer instrumented with the documented instrumentLogBrewKafkaJsProducer and instrumentLogBrewKafkaJsConsumer, the producer inside an active Node trace with a request user, and the KafkaJS logger through createLogBrewKafkaJsLogCreator; no broker is installed, so the producer and consumer are in-memory stand-ins with the KafkaJS send and run shapes, as in the package's own examples; one message that succeeds and one whose handler throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-kafkajs",
-      "inputs": "0c7e27e27f95c49b16252f60b238dfd3a1eb39caa3a9e35b0e5edfc3d84e0b8c"
+      "inputs": "05b1dd4cb09ef5d5547b37c6b3815739548d2f108523abad80f246dba339e2cd"
     },
     "js/logbrew-nestjs": {
       "share": 81.8,
@@ -762,7 +762,7 @@
       },
       "method": "NestJS 12 Express app with the documented global interceptor, Nest logger, request metrics, and request user set in a guard; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-nestjs",
-      "inputs": "77e9af47defb9491582331d56984085efdf9afde8802132a516a4e0237f575ea"
+      "inputs": "cd46123c7d10ad3ac30f6fd6a2a46cd2cc4141a14091063e5b4cebc6bf9bc8e4"
     },
     "js/logbrew-next": {
       "share": 72.7,
@@ -796,7 +796,7 @@
       },
       "method": "Next.js 16 App Router production build (next build, next start) with the documented instrumentation onRequestError hook, wrapped Route Handlers with request metrics and the request user, and Pino capture from @logbrew/node; one route that succeeds, one that throws, and one server component that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-next",
-      "inputs": "b21634382a02c9e23014efa4c6029f6e4086c49a5d730bb52e786bc67172b126"
+      "inputs": "7378c047eccf6277b6133d54d6db18eabb985ba818be8254df901d784ca665bb"
     },
     "js/logbrew-node": {
       "share": 90.9,
@@ -827,7 +827,7 @@
       },
       "method": "node:http server wrapped with withLogBrewHttpHandler, with request user, Pino capture, and console breadcrumbs; one request that succeeds and one that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-node",
-      "inputs": "132c7c369d93d127b01da2c23e5e4a7cedb462969a8cfd930fa201c55af3d27e"
+      "inputs": "3f8f42ea6bde4b128f6d73a0a112d83102bf7a73984907d20feabb90318461d8"
     },
     "js/logbrew-prisma": {
       "share": 100.0,
@@ -857,7 +857,7 @@
       },
       "method": "Prisma 7 client on a local SQLite file through the better-sqlite3 driver adapter, instrumented with instrumentLogBrewPrismaClient inside an active Node trace with a request user and Prisma's info, warn, and error log events; two queries that succeed and one unique-constraint failure",
       "probe": "tools/capture-matrix/probes/js/logbrew-prisma",
-      "inputs": "1df79d2522f08c0b7971a82cf132e6dfdd0d31338fb8857d9c0998535e6872a5"
+      "inputs": "0db61df1becb4a4e20f6ddbe500ed83fd09b8c9f17f0d4752399b0804b37d995"
     },
     "js/logbrew-react": {
       "share": 100.0,
@@ -885,7 +885,7 @@
       },
       "method": "React 19 app rendered with react-dom under happy-dom, with LogBrewProvider, the React 19 root error options, LogBrewErrorBoundary, the React Router route observer, the @logbrew/react/browser hook with fetch timing, console capture, and the @logbrew/browser fetch transport; one API call through window.fetch, one route that renders and one whose component throws during render",
       "probe": "tools/capture-matrix/probes/js/logbrew-react",
-      "inputs": "9a41d3db3cfc29de5d3dfbc2b784d5863ad414d4fc9d82c567699a3c1224cc03"
+      "inputs": "c6f2a2e17e5aeca9bad4e15b1e65b47457f51fe1ef1e5a812178f3c006972551"
     },
     "js/logbrew-react-native": {
       "share": 100.0,
@@ -913,7 +913,7 @@
       },
       "method": "React Native client from the app entry Metro resolves (the react-native export condition, with a stand-in native module that reports the process start), the default app start metric, and the Platform, AppState, ErrorUtils, and navigation container shapes its own tests and examples use, createReactNativeFetchTransport, the reversible instrumentation (global fetch, navigation, and AppState spans) under an incoming W3C trace, the global error handler, and console capture; one API call that succeeds, one that fails, a handled error, and a global error",
       "probe": "tools/capture-matrix/probes/js/logbrew-react-native",
-      "inputs": "e5e273267a25fa1b6aacc1e95aa39d7a64081f9803193dc1d05aa7465c64e137"
+      "inputs": "ef5be585ca5f031e18cf50e40eb7d53c3d72cccebcdbf9bf8eb766cc875ff269"
     },
     "js/logbrew-svelte": {
       "share": 100.0,
@@ -941,7 +941,7 @@
       },
       "method": "Svelte 5 component compiled with svelte/compiler and mounted under happy-dom, with installLogBrewBrowser and its fetch transport, setLogBrewContext, console capture, and captureSvelteError in a svelte:boundary handler around a render that throws; plus the SvelteKit handle and handleError hooks called with web Request events the way SvelteKit calls them, since a real SvelteKit server needs a Vite build",
       "probe": "tools/capture-matrix/probes/js/logbrew-svelte",
-      "inputs": "f1cb263300d8e1b136898e00dcb1e9007f95fa85a6c6965d9f263860c8664ff7"
+      "inputs": "e395e274fe0c655d09484e2c07bd692e9854edf610fc032a94dc2aed4975c119"
     },
     "js/logbrew-vue": {
       "share": 100.0,
@@ -969,7 +969,7 @@
       },
       "method": "Vue 3 app mounted under happy-dom with createLogBrewVuePlugin, which installs @logbrew/browser with its fetch transport, breadcrumbs, and request spans, plus $logbrew and console capture; one API call through window.fetch under tracePropagationTargets and a click handler that throws",
       "probe": "tools/capture-matrix/probes/js/logbrew-vue",
-      "inputs": "cfa17d44dd641ae2d3b77ccc4c6ed42d0f982f35c4b4570aecbe57c62dce0904"
+      "inputs": "9fca097dbda1a12a59a8063a2c7d74bfe264b580fda9dcc1484bf878b65e4bd0"
     },
     "kotlin/logbrew-kotlin": {
       "share": 100.0,

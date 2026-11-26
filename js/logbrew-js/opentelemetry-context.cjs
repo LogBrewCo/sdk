@@ -23,7 +23,8 @@ const HEX_RADIX = 16;
 const HEX_BYTE_WIDTH = 2;
 const SAMPLED_BIT_BASE = 2;
 const SAMPLED_BIT = 1;
-const OPENTELEMETRY_API_PACKAGE = "@opentelemetry/api";
+const OPENTELEMETRY_API_REGISTRY = Symbol.for("opentelemetry.js.api.1");
+const OPENTELEMETRY_SPAN_KEY = Symbol.for("OpenTelemetry Context Key SPAN");
 
 /**
  * @param {unknown} traceId
@@ -137,14 +138,15 @@ function resolveLogBrewChildSpanId(options = {}) {
 /**
  * @param {unknown} method
  * @param {unknown} thisArg
+ * @param {readonly unknown[]} [args]
  * @returns {{ value: unknown } | undefined}
  */
-function callWithoutArguments(method, thisArg) {
+function callMethod(method, thisArg, args = []) {
   if (typeof method !== "function") {
     return undefined;
   }
   try {
-    return { value: Reflect.apply(method, thisArg, []) };
+    return { value: Reflect.apply(method, thisArg, args) };
   } catch {
     return undefined;
   }
@@ -182,7 +184,7 @@ function logbrewTraceContextFromOpenTelemetrySpan(span, options = {}) {
   const getSpanContext = typeof span["spanContext"] === "function"
     ? span["spanContext"]
     : span["getSpanContext"];
-  const spanContext = callWithoutArguments(getSpanContext, span);
+  const spanContext = callMethod(getSpanContext, span);
   if (spanContext === undefined) {
     return NULL_VALUE;
   }
@@ -190,34 +192,18 @@ function logbrewTraceContextFromOpenTelemetrySpan(span, options = {}) {
 }
 
 /**
- * @returns {((id: string) => unknown) | undefined}
- */
-function optionalRequire() {
-  /** @type {unknown} */
-  const moduleRequire = typeof module === "undefined" ? undefined : Reflect.get(module, "require");
-  if (typeof moduleRequire === "function") {
-    return (id) => {
-      /** @type {unknown} */
-      const required = Reflect.apply(moduleRequire, module, [id]);
-      return required;
-    };
-  }
-  return typeof require === "function" ? require : undefined;
-}
-
-/**
  * @returns {unknown}
  */
-function optionalOpenTelemetryApi() {
-  const requireOptional = optionalRequire();
-  if (requireOptional === undefined) {
+function registeredActiveOpenTelemetrySpan() {
+  /** @type {unknown} */
+  const registry = Reflect.get(globalThis, OPENTELEMETRY_API_REGISTRY);
+  const contextManager = optionalProperty(registry, "context");
+  const activeContext = callMethod(optionalProperty(contextManager, "active"), contextManager);
+  if (activeContext === undefined) {
     return undefined;
   }
-  try {
-    return requireOptional(OPENTELEMETRY_API_PACKAGE);
-  } catch {
-    return undefined;
-  }
+  const getValue = optionalProperty(activeContext.value, "getValue");
+  return callMethod(getValue, activeContext.value, [OPENTELEMETRY_SPAN_KEY])?.value;
 }
 
 /**
@@ -225,14 +211,13 @@ function optionalOpenTelemetryApi() {
  * @returns {LogCorrelationTraceContext | null}
  */
 function logbrewTraceContextFromCurrentOpenTelemetrySpan(options = {}) {
-  const openTelemetryApi = optionalProperty(options, "openTelemetryApi") ?? optionalOpenTelemetryApi();
-  const trace = optionalProperty(openTelemetryApi, "trace");
-  const getActiveSpan = optionalProperty(trace, "getActiveSpan");
-  const activeSpan = callWithoutArguments(getActiveSpan, trace);
-  if (activeSpan === undefined) {
-    return NULL_VALUE;
+  const openTelemetryApi = optionalProperty(options, "openTelemetryApi");
+  if (openTelemetryApi === undefined || openTelemetryApi === null) {
+    return logbrewTraceContextFromOpenTelemetrySpan(registeredActiveOpenTelemetrySpan(), options);
   }
-  return logbrewTraceContextFromOpenTelemetrySpan(activeSpan.value, options);
+  const trace = optionalProperty(openTelemetryApi, "trace");
+  const activeSpan = callMethod(optionalProperty(trace, "getActiveSpan"), trace)?.value;
+  return logbrewTraceContextFromOpenTelemetrySpan(activeSpan, options);
 }
 
 module.exports = {
