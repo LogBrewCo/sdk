@@ -1,4 +1,4 @@
-import type { IAuthenticateGeneric, Icon, ICredentialTestRequest, ICredentialType, INodeProperties } from "n8n-workflow";
+import type { IAuthenticateGeneric, ICredentialTestRequest, ICredentialType, INodeProperties, Icon } from "n8n-workflow";
 
 class LogBrewApi implements ICredentialType {
   public readonly authenticate: IAuthenticateGeneric = {

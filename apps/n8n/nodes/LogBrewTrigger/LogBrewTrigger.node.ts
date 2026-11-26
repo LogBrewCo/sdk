@@ -7,9 +7,9 @@ import type {
   INodeTypeDescription,
   IPollFunctions,
 } from "n8n-workflow";
-import { NodeConnectionTypes } from "n8n-workflow";
 import { connect, projectOptions } from "../LogBrew/transport";
 import { latestAlert, latestIssue, pollFiredAlerts, pollNewIssues } from "../LogBrew/client";
+import { NodeConnectionTypes } from "n8n-workflow";
 import type { Poll } from "../LogBrew/client";
 
 type Found = Readonly<{ cursor: string; items: readonly (Alert | Issue)[] }>;

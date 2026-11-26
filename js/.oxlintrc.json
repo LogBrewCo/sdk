@@ -146,6 +146,15 @@
           {
             "from": "package",
             "name": [
+              "IExecuteFunctions",
+              "ILoadOptionsFunctions",
+              "IPollFunctions"
+            ],
+            "package": "n8n-workflow"
+          },
+          {
+            "from": "package",
+            "name": [
               "IncomingMessage",
               "ServerResponse"
             ],
