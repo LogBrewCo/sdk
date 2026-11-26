@@ -299,6 +299,33 @@ func TestRegistryPublicationAbsent(t *testing.T) {
 	}
 }
 
+func TestRegistryStandaloneNPMPackage(t *testing.T) {
+	release := map[string][]registryReply{"https://registry.npmjs.org/n8n-nodes-logbrew/0.1.1": ok(`{"version": "0.1.1",
+		"dist": {"attestations": {"url": "https://registry.npmjs.org/-/npm/v1/attestations/n8n-nodes-logbrew@0.1.1",
+		"provenance": {"predicateType": "https://slsa.dev/provenance/v1"}}}}`)}
+	code, output, diagnostic, _ := runRegistry(release, "--target", "npm", "--npm-package", "n8n-nodes-logbrew",
+		"--npm-version", "n8n-nodes-logbrew=0.1.1", "--require-npm-provenance", "--retries", "0")
+	if code != exitOK {
+		t.Fatalf("own version = %d, %q, %q", code, output, diagnostic)
+	}
+	catalog, _ := loadReleaseCatalog(releaseCatalogText)
+	released := []string{"--require-released-package-set", "--retries", "0"}
+	for _, name := range registryNPM {
+		released = append(released, "--npm-version", name+"=0.1.0")
+	}
+	for _, id := range catalog.nugetIDs() {
+		released = append(released, "--nuget-version", id+"=0.1.0")
+	}
+	const refused = "released package verification requires exact npm and NuGet maps\n"
+	if _, _, diagnostic, _ = runRegistry(nil, released...); strings.HasSuffix(diagnostic, refused) {
+		t.Fatalf("SDK release set = %q", diagnostic)
+	}
+	released = append(released, "--npm-version", "n8n-nodes-logbrew=0.1.1")
+	if code, _, diagnostic, _ = runRegistry(nil, released...); code != exitUsage || !strings.HasSuffix(diagnostic, refused) {
+		t.Fatalf("SDK release set with the n8n node = %d, %q", code, diagnostic)
+	}
+}
+
 func TestRegistryProvenance(t *testing.T) {
 	attestation := func(predicate, address string) string {
 		return `{"version": "1.0.0+b/x", "dist": {"attestations": {"url": "` + address +

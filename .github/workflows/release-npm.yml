@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "js/*/package.json"
+      - "apps/n8n/package.json"
   workflow_dispatch:
 
 permissions:
