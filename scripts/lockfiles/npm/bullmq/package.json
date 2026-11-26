@@ -3,7 +3,7 @@
   "private": true,
   "dependencies": {
     "@types/node": "26.6.6",
-    "bullmq": "6.7.7",
+    "bullmq": "6.7.8",
     "typescript": "7.0.2"
   }
 }
