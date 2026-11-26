@@ -1,10 +1,19 @@
-import type { BaseContext, ExecuteContext, Item, Json, NodeDescription, Option } from "./n8n";
+import type {
+  IDataObject,
+  IExecuteFunctions,
+  ILoadOptionsFunctions,
+  INodeExecutionData,
+  INodePropertyOptions,
+  INodeType,
+  INodeTypeDescription,
+} from "n8n-workflow";
+import { NodeConnectionTypes } from "n8n-workflow";
 import { connect, projectOptions } from "./transport";
 import { levelOf, resolveIssue, sendLog } from "./client";
 import type { Send } from "./client";
 
 type Connection = Readonly<{ apiUrl: string; send: Send }>;
-type Outcome = Readonly<{ error: Error } | { json: Json }>;
+type Outcome = Readonly<{ error: Error } | { json: IDataObject }>;
 
 function attributesOf(value: unknown): Readonly<Record<string, unknown>> {
   const parsed: unknown = typeof value === "string" && value.trim() !== "" ? JSON.parse(value) : value;
@@ -14,12 +23,12 @@ function attributesOf(value: unknown): Readonly<Record<string, unknown>> {
   return {};
 }
 
-function text(context: ExecuteContext, name: string, index: number): string {
+function text(context: IExecuteFunctions, name: string, index: number): string {
   const value = context.getNodeParameter(name, index, "");
   return typeof value === "string" ? value.trim() : "";
 }
 
-async function runOne(context: ExecuteContext, connection: Connection, index: number): Promise<Json> {
+async function runOne(context: IExecuteFunctions, connection: Connection, index: number): Promise<IDataObject> {
   const operation = text(context, "operation", index);
   if (operation === "resolve") {
     const issue = await resolveIssue(connection.send, connection.apiUrl, text(context, "issueId", index));
@@ -27,7 +36,7 @@ async function runOne(context: ExecuteContext, connection: Connection, index: nu
   }
   const environment = text(context, "environment", index);
   const reply = await sendLog(connection.send, {
-    attributes: attributesOf(context.getNodeParameter("attributes", index, "{}")),
+    attributes: attributesOf(context.getNodeParameter("additionalFields.attributes", index, "{}")),
     environment: environment === "" ? "production" : environment,
     id: crypto.randomUUID(),
     level: levelOf(text(context, "level", index)),
@@ -40,7 +49,7 @@ async function runOne(context: ExecuteContext, connection: Connection, index: nu
   return typeof reply === "object" && reply !== null ? { ...reply } : {};
 }
 
-async function settle(context: ExecuteContext, connection: Connection, index: number): Promise<Outcome> {
+async function settle(context: IExecuteFunctions, connection: Connection, index: number): Promise<Outcome> {
   try {
     return { json: await runOne(context, connection, index) };
   } catch (error) {
@@ -48,17 +57,17 @@ async function settle(context: ExecuteContext, connection: Connection, index: nu
   }
 }
 
-class LogBrew {
-  public readonly description: NodeDescription = {
+class LogBrew implements INodeType {
+  public readonly description: INodeTypeDescription = {
     credentials: [{ name: "logBrewApi", required: true }],
     defaults: { name: "LogBrew" },
     description: "Send logs to LogBrew and resolve LogBrew issues",
     displayName: "LogBrew",
     group: ["output"],
     icon: { dark: "file:../../icons/logbrew.dark.svg", light: "file:../../icons/logbrew.svg" },
-    inputs: ["main"],
+    inputs: [NodeConnectionTypes.Main],
     name: "logBrew",
-    outputs: ["main"],
+    outputs: [NodeConnectionTypes.Main],
     properties: [
       {
         displayName: "Resource",
@@ -159,12 +168,21 @@ class LogBrew {
         type: "string",
       },
       {
-        displayName: "Attributes",
-        default: "{}",
-        description: "Extra fields to store with the log, such as an order ID",
+        displayName: "Additional Fields",
+        default: {},
         displayOptions: { show: { operation: ["send"], resource: ["log"] } },
-        name: "attributes",
-        type: "json",
+        name: "additionalFields",
+        options: [
+          {
+            displayName: "Attributes",
+            default: "{}",
+            description: "Extra fields to store with the log, such as an order ID",
+            name: "attributes",
+            type: "json",
+          },
+        ],
+        placeholder: "Add Field",
+        type: "collection",
       },
     ],
     subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
@@ -174,15 +192,15 @@ class LogBrew {
 
   public readonly methods = {
     loadOptions: {
-      async getProjects(this: BaseContext): Promise<readonly Option[]> {
+      async getProjects(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
         return projectOptions(this);
       },
     },
   };
 
-  public async execute(this: ExecuteContext): Promise<readonly (readonly Item[])[]> {
+  public async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
     const connection = await connect(this);
-    const results: Item[] = [];
+    const results: INodeExecutionData[] = [];
     for (const [index] of this.getInputData().entries()) {
       const outcome = await settle(this, connection, index);
       if ("error" in outcome && !this.continueOnFail()) {

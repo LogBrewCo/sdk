@@ -1,17 +1,25 @@
 import type { Alert, Issue } from "../LogBrew/records";
-import type { BaseContext, Item, NodeDescription, Option, PollContext } from "../LogBrew/n8n";
+import type {
+  ILoadOptionsFunctions,
+  INodeExecutionData,
+  INodePropertyOptions,
+  INodeType,
+  INodeTypeDescription,
+  IPollFunctions,
+} from "n8n-workflow";
+import { NodeConnectionTypes } from "n8n-workflow";
 import { connect, projectOptions } from "../LogBrew/transport";
 import { latestAlert, latestIssue, pollFiredAlerts, pollNewIssues } from "../LogBrew/client";
 import type { Poll } from "../LogBrew/client";
 
 type Found = Readonly<{ cursor: string; items: readonly (Alert | Issue)[] }>;
 
-function parameter(context: PollContext, name: string): string {
+function parameter(context: IPollFunctions, name: string): string {
   const value = context.getNodeParameter(name, "");
   return typeof value === "string" ? value : "";
 }
 
-async function find(context: PollContext, cursor: string): Promise<Found> {
+async function find(context: IPollFunctions, cursor: string): Promise<Found> {
   const { apiUrl, send } = await connect(context);
   const projectId = parameter(context, "projectId");
   const alerts = parameter(context, "event") === "alertFired";
@@ -25,8 +33,8 @@ async function find(context: PollContext, cursor: string): Promise<Found> {
   return found;
 }
 
-class LogBrewTrigger {
-  public readonly description: NodeDescription = {
+class LogBrewTrigger implements INodeType {
+  public readonly description: INodeTypeDescription = {
     credentials: [{ name: "logBrewApi", required: true }],
     defaults: { name: "LogBrew Trigger" },
     description: "Start a workflow when LogBrew finds a new issue or an alert fires",
@@ -35,7 +43,7 @@ class LogBrewTrigger {
     icon: { dark: "file:../../icons/logbrew.dark.svg", light: "file:../../icons/logbrew.svg" },
     inputs: [],
     name: "logBrewTrigger",
-    outputs: ["main"],
+    outputs: [NodeConnectionTypes.Main],
     polling: true,
     properties: [
       {
@@ -73,13 +81,13 @@ class LogBrewTrigger {
 
   public readonly methods = {
     loadOptions: {
-      async getProjects(this: BaseContext): Promise<readonly Option[]> {
+      async getProjects(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
         return projectOptions(this);
       },
     },
   };
 
-  public async poll(this: PollContext): Promise<readonly (readonly Item[])[] | null> {
+  public async poll(this: IPollFunctions): Promise<INodeExecutionData[][] | null> {
     const state = this.getWorkflowStaticData("node");
     const saved = state["cursor"];
     const cursor = typeof saved === "string" ? saved : new Date().toISOString();

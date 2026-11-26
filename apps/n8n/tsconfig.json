@@ -6,6 +6,7 @@
     ],
     "module": "preserve",
     "moduleResolution": "bundler",
+    "skipLibCheck": true,
     "paths": {},
     "types": [
       "bun",
