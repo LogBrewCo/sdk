@@ -35,3 +35,28 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: bash scripts/npm_release.sh publish
+
+  # JSR takes a publish only from a run that a scope member started. The person
+  # who pushed or dispatched starts this run, while github-actions[bot] starts
+  # the Publish Packages runs that the release job dispatches.
+  jsr:
+    name: Publish new JSR versions
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+
+      - name: Publish every JSR version JSR does not have
+        run: bash scripts/jsr_publish.sh publish-all

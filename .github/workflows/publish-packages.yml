@@ -363,7 +363,9 @@ jobs:
   jsr:
     name: JSR packages
     needs: npm
-    if: ${{ ! inputs.dry_run }}
+    # JSR refuses a run that a bot started. Release npm Packages publishes to
+    # JSR itself after the runs it dispatches.
+    if: ${{ ! inputs.dry_run && ! endsWith(github.actor, '[bot]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
