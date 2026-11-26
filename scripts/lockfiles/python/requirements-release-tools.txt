@@ -4,9 +4,9 @@ backports-tarfile==1.2.0 ; python_full_version < '3.12' and platform_machine != 
     --hash=sha256:77e284d754527b01fb1e6fa8a1afe577858ebe4e9dad8919e34c862cb399bc34 \
     --hash=sha256:d75e02c268746e1b8144c278978b6e98e85de6ad16f8e4b0844a154557eca991
     # via jaraco-context
-build==1.5.0 \
-    --hash=sha256:13f3eecb844759ab66efec90ca17639bbf14dc06cb2fdf37a9010322d9c50a6f \
-    --hash=sha256:302c22c3ba2a0fd5f3911918651341ebb3896176cbdec15bd421f80b1afc7647
+build==1.6.1 \
+    --hash=sha256:51cc11666391ab6f092070437ac747002ff46f3e4113a3622177ee6b488bfc53 \
+    --hash=sha256:ecd351a4be9d35a9eaaba244a7687143c9c7d4aea6ac964e7e7ddab20cbcf4e7
     # via -r requirements-release-tools.in
 certifi==2026.11.20 \
     --hash=sha256:7422df25243767b9877031a2248cb14d09ddac9beee846f4cef3d5c9191d488f \
@@ -639,9 +639,9 @@ uv==0.13.9 \
     --hash=sha256:ecb6028d79dc96fbeafffe5c8af62a7099487ebc05a701e76714eebcffd06375 \
     --hash=sha256:eeb92051c2123b9730c46b04cc843cfa4bc7d7b0aec56df431a2215ef4cb0273
     # via -r requirements-release-tools.in
-wheel==0.47.0 \
-    --hash=sha256:212281cab4dff978f6cedd499cd893e1f620791ca6ff7107cf270781e587eced \
-    --hash=sha256:cc72bd1009ba0cf63922e28f94d9d83b920aa2bb28f798a31d0691b02fa3c9b3
+wheel==0.48.0 \
+    --hash=sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab \
+    --hash=sha256:94800765601e9171bf5d58d066e640662842bcedcbab982b2c90787a2c987322
     # via -r requirements-release-tools.in
 zipp==4.1.2 ; python_full_version < '3.10.2' or (python_full_version >= '3.10.2' and python_full_version < '3.12' and platform_machine != 'ppc64le' and platform_machine != 's390x') \
     --hash=sha256:b30cb6cd253122169c47de245ca24a86bac2a5d3802ba15bf7ba6414eb9e144d \
