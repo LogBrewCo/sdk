@@ -1,0 +1,48 @@
+# Reviewed exceptions for advisories in this package's development tools.
+#
+# n8n rejects an "overrides" or "resolutions" field in a community node's
+# package.json (lint rule @n8n/community-nodes/no-overrides-field), so this
+# package cannot pin a fixed version below its tools. None of these packages is
+# a runtime dependency: the package ships only dist/, and n8n provides
+# n8n-workflow. Remove an entry when @n8n/node-cli or n8n-workflow moves to a
+# fixed version, and check each entry again before it expires.
+
+[[IgnoredVulns]]
+id = "GHSA-mrhx-c7xc-m3w5"
+effectiveUntil = 2027-02-26T00:00:00Z
+reason = "zod 3 has no fixed release (the fix is in zod 4.6.6). n8n-workflow requires zod 3.25.76 in every release and fails to load with zod 4. zod runs only in tests and lint, on this repository's own input."
+
+[[IgnoredVulns]]
+id = "GHSA-6pq8-jhm2-2vcw"
+effectiveUntil = 2027-02-26T00:00:00Z
+reason = "qs 6.16.0 comes only through @n8n/ai-node-sdk, which @n8n/node-cli installs for its project templates. n8n-node lint never loads it."
+
+[[IgnoredVulns]]
+id = "GHSA-528h-pc64-c93x"
+effectiveUntil = 2027-02-26T00:00:00Z
+reason = "stream-json 1.9.1 comes only through @n8n/ai-node-sdk, which @n8n/node-cli installs for its project templates. n8n-node lint never loads it."
+
+[[IgnoredVulns]]
+id = "GHSA-hqr4-qq8f-hg3x"
+effectiveUntil = 2027-02-26T00:00:00Z
+reason = "stream-json 1.9.1 comes only through @n8n/ai-node-sdk, which @n8n/node-cli installs for its project templates. n8n-node lint never loads it."
+
+[[IgnoredVulns]]
+id = "GHSA-mjw6-4jj6-33hc"
+effectiveUntil = 2027-02-26T00:00:00Z
+reason = "stream-json 1.9.1 comes only through @n8n/ai-node-sdk, which @n8n/node-cli installs for its project templates. n8n-node lint never loads it."
+
+[[IgnoredVulns]]
+id = "GHSA-w5hq-g745-h8pq"
+effectiveUntil = 2027-02-26T00:00:00Z
+reason = "uuid 10.0.0 comes only through @n8n/ai-node-sdk (LangChain), which @n8n/node-cli installs for its project templates. n8n-node lint never loads it. n8n-workflow uses the fixed uuid 11.1.1."
+
+[[IgnoredVulns]]
+id = "GHSA-3g3m-2fjr-6pw4"
+effectiveUntil = 2027-02-26T00:00:00Z
+reason = "glob 11.1.0 comes only through rimraf, which only the n8n-node build command loads. This package builds with tsc and runs only n8n-node lint."
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+effectiveUntil = 2027-02-26T00:00:00Z
+reason = "minimatch 10.2.6 has no fixed 10.x release, and @oclif/core, typescript-eslint, and ts-morph require ^10. Lint passes it only glob patterns from this repository's own configuration, never untrusted patterns."

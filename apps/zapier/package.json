@@ -30,5 +30,14 @@
   },
   "patchedDependencies": {
     "zapier-platform-core@19.3.0": "patches/zapier-platform-core@19.3.0.patch"
+  },
+  "overrides": {
+    "yeoman-environment": "6.3.0",
+    "simple-git": "4.1.0",
+    "tmp": "0.2.7",
+    "glob@10": "14.0.6",
+    "glob@13": "14.0.6",
+    "minimatch@9": "11.0.9",
+    "minimatch@10": "11.0.9"
   }
 }

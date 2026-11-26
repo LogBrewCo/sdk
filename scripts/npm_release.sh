@@ -15,7 +15,8 @@
 # to only a README, an example, a test, or a tsconfig needs no release. A
 # package that publishes a built `dist` publishes every file its directory
 # holds other than package.json, README.md, and test, because its build reads
-# them. publish skips a package that has no npm page yet, because npm trusted
+# them; osv-scanner.toml holds only advisory exceptions and needs no release.
+# publish skips a package that has no npm page yet, because npm trusted
 # publishing needs the first version of a package published by hand.
 set -euo pipefail
 
@@ -41,7 +42,7 @@ check() {
         paths=()
         while read -r path; do
             if [[ "$path" == dist ]]; then
-                paths+=("$dir" ":(exclude)$dir/package.json" ":(exclude)$dir/README.md" ":(exclude)$dir/test")
+                paths+=("$dir" ":(exclude)$dir/package.json" ":(exclude)$dir/README.md" ":(exclude)$dir/test" ":(exclude)$dir/osv-scanner.toml")
             else
                 paths+=("$dir/$path")
             fi
