@@ -5,12 +5,15 @@
 # version its package.json gives npm.
 #
 #   jsr_publish.sh check                  dry-run every JSR package
+#   jsr_publish.sh publish-all            publish every JSR package version
 #   jsr_publish.sh publish NAME=VERSION...
 #                                         publish each listed npm version whose
 #                                         package has a jsr.json
 #
-# publish runs in GitHub Actions: the job signs in through GitHub OIDC, and JSR adds
-# provenance and skips a version it already has.
+# The publish modes run in GitHub Actions: the job signs in through GitHub OIDC,
+# and JSR adds provenance and skips a version it already has. JSR accepts the
+# sign-in only when a scope member started the workflow run, so a run that
+# github-actions[bot] started cannot publish.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -45,10 +48,10 @@ run_jsr() { # $1: package dir; the rest go to jsr publish
     (cd "$dir" && bun "../../$jsr_cli" publish --set-version "$(jq -r .version package.json)" "$@")
 }
 
-check() {
+publish_all() { # arguments go to jsr publish
     local manifest
     for manifest in js/*/jsr.json; do
-        run_jsr "$(dirname "$manifest")" --dry-run --allow-dirty
+        run_jsr "$(dirname "$manifest")" "$@"
     done
 }
 
@@ -64,7 +67,8 @@ publish() {
 }
 
 case "${1:-}" in
-    check) link_local_packages; check ;;
+    check) link_local_packages; publish_all --dry-run --allow-dirty ;;
+    publish-all) link_local_packages; publish_all ;;
     publish) shift; link_local_packages; publish "$@" ;;
-    *) echo "usage: jsr_publish.sh check | publish NAME=VERSION..." >&2; exit 2 ;;
+    *) echo "usage: jsr_publish.sh check | publish-all | publish NAME=VERSION..." >&2; exit 2 ;;
 esac

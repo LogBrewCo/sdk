@@ -6,7 +6,9 @@
 # passes for README, example, tsconfig, and scripts changes. Proves that a
 # package that publishes a built dist needs a new version for a source change
 # but not for a README or test change. Proves that
-# waves publishes a package after the workspace peers it needs.
+# waves publishes a package after the workspace peers it needs, and that
+# scripts/jsr_publish.sh publish-all publishes each package that has a jsr.json
+# at the version its package.json gives npm.
 
 set -euo pipefail
 
@@ -75,5 +77,17 @@ waves="$(bash "$repo/scripts/npm_release.sh" waves "$repo/js/logbrew-adapter" "$
 [[ "$waves" == $'js/logbrew-core\njs/logbrew-adapter' ]] || { printf 'FAIL: waves printed %s\n' "$waves" >&2; exit 1; }
 [[ "$(bash "$repo/scripts/npm_release.sh" waves "$repo/js/logbrew-adapter" | sed "s|$repo/||g")" == js/logbrew-adapter ]] ||
     { echo 'FAIL: a published peer delays its dependent' >&2; exit 1; }
+
+git -C "$repo" reset -q --hard "$base"
+cp "$root/scripts/jsr_publish.sh" "$repo/scripts/"
+mkdir -p "$repo/tools/jsr-publish/node_modules/.bin" "$work/bin"
+printf '#!/bin/sh\n' >"$repo/tools/jsr-publish/node_modules/.bin/jsr"
+printf '#!/bin/sh\necho "${PWD##*/} $*" >>"%s"\n' "$work/jsr.log" >"$work/bin/bun"
+chmod +x "$repo/tools/jsr-publish/node_modules/.bin/jsr" "$work/bin/bun"
+jq '{name, version: "0.0.1"}' "$repo/js/logbrew-adapter/package.json" >"$repo/js/logbrew-adapter/jsr.json"
+jq '.version = "1.0.1"' "$repo/js/logbrew-adapter/package.json" >"$work/m" && mv "$work/m" "$repo/js/logbrew-adapter/package.json"
+PATH="$work/bin:$PATH" bash "$repo/scripts/jsr_publish.sh" publish-all
+[[ "$(cat "$work/jsr.log")" == "logbrew-adapter ../../tools/jsr-publish/node_modules/.bin/jsr publish --set-version 1.0.1" ]] ||
+    { printf 'FAIL: publish-all ran %s\n' "$(cat "$work/jsr.log")" >&2; exit 1; }
 
 echo "npm release checks ok"
