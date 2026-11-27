@@ -20,9 +20,9 @@ cat > "$tmp_dir/composer.json" <<'EOF'
     "phpstan/phpstan": "2.3.6",
     "monolog/monolog": "3.13.0",
     "psr/log": "3.0.2",
-    "symfony/console": "8.1.11",
-    "symfony/framework-bundle": "8.1.11",
-    "symfony/messenger": "8.1.11",
+    "symfony/console": "8.1.12",
+    "symfony/framework-bundle": "8.1.12",
+    "symfony/messenger": "8.1.12",
     "symfony/monolog-bundle": "4.1.0"
   }
 }
