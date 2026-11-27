@@ -1,8 +1,8 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { once } from "node:events";
 import path from "node:path";
 import { readField } from "./fields.js";
-import { setTimeout as sleep } from "node:timers/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
@@ -14,8 +14,8 @@ import { tmpdir } from "node:os";
  * @typedef {{ readonly reject: (error: Readonly<Error>) => void, readonly resolve: (result: unknown) => void }} Waiter
  */
 
-const PORT_POLL_ATTEMPTS = 200;
-const PORT_POLL_MS = 50;
+const LAUNCH_TIMEOUT_MS = 60_000;
+const LISTENING = /DevTools listening on (?<url>ws:\/\/\S+)/u;
 const ID_STEP = 1;
 const candidates = [
   process.env["CHROME_PATH"] ?? "",
@@ -52,17 +52,17 @@ async function findChrome() {
 }
 
 /**
- * @param {string} profile
+ * @param {Readonly<AsyncIterable<string>>} lines
  * @returns {Promise<string>}
  */
-async function readDebuggerUrl(profile) {
-  const portFile = path.join(profile, "DevToolsActivePort");
-  for (let attempt = 0; attempt < PORT_POLL_ATTEMPTS && !(await exists(portFile)); attempt += ID_STEP) {
-    await sleep(PORT_POLL_MS);
+async function readDebuggerUrl(lines) {
+  for await (const line of lines) {
+    const url = LISTENING.exec(line)?.groups?.["url"];
+    if (url !== undefined) {
+      return url;
+    }
   }
-  const portText = await readFile(portFile, "utf8");
-  const [port = "", debuggerPath = ""] = portText.trim().split("\n");
-  return `ws://127.0.0.1:${port}${debuggerPath}`;
+  throw new Error("Chrome exited before it opened DevTools.");
 }
 
 /**
@@ -175,20 +175,26 @@ async function launchChrome() {
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
       "about:blank"
     ],
-    { stdio: "ignore" }
+    { stdio: ["ignore", "ignore", "pipe"] }
   );
-  const { close, send, waitFor } = await connect(await readDebuggerUrl(profile));
-  return {
-    async close() {
-      close();
-      const exited = once(child, "exit");
-      child.kill();
-      await exited;
-      await rm(profile, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
-    },
-    send,
-    waitFor
-  };
+  const lines = createInterface({ input: child.stderr, signal: AbortSignal.timeout(LAUNCH_TIMEOUT_MS) });
+  try {
+    const { close, send, waitFor } = await connect(await readDebuggerUrl(lines));
+    return {
+      async close() {
+        close();
+        const exited = once(child, "exit");
+        child.kill();
+        await exited;
+        await rm(profile, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
+      },
+      send,
+      waitFor
+    };
+  } finally {
+    lines.close();
+    child.stderr.resume();
+  }
 }
 
 export { launchChrome };
