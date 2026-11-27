@@ -108,6 +108,7 @@ namespace LogBrew;
  */
 final class LogBrewClient
 {
+    public const SERVER_API_KEY_VARIABLE = 'LOGBREW_SERVER_API_KEY';
     private const DEFAULT_MAX_QUEUE_SIZE = 1_000;
     private const DEFAULT_MAX_QUEUE_BYTES = 4_194_304;
     private const DEFAULT_MAX_BATCH_EVENTS = 100;
@@ -205,9 +206,10 @@ final class LogBrewClient
 
     /**
      * Create a client from public SDK identity, retry, and API key settings.
+     * A null or blank $apiKey reads LOGBREW_SERVER_API_KEY.
      */
     public static function create(
-        string $apiKey,
+        ?string $apiKey,
         string $sdkName,
         string $sdkVersion,
         int $maxRetries = 2,
@@ -220,7 +222,7 @@ final class LogBrewClient
         ?TelemetryContext $context = null,
         bool $captureRuntimeContext = true
     ): self {
-        self::requireNonEmpty('api_key', $apiKey);
+        $apiKey = self::resolveServerApiKey($apiKey);
         self::requireNonEmpty('sdk_name', $sdkName);
         self::requireNonEmpty('sdk_version', $sdkVersion);
         if ($maxRetries < 0) {
@@ -1232,6 +1234,22 @@ final class LogBrewClient
         }
 
         return true;
+    }
+
+    private static function resolveServerApiKey(?string $apiKey): string
+    {
+        foreach ([
+            $apiKey,
+            $_SERVER[self::SERVER_API_KEY_VARIABLE] ?? null,
+            $_ENV[self::SERVER_API_KEY_VARIABLE] ?? null,
+            getenv(self::SERVER_API_KEY_VARIABLE),
+        ] as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return $candidate;
+            }
+        }
+
+        throw new SdkError('configuration_error', sprintf('set %s or pass apiKey', self::SERVER_API_KEY_VARIABLE));
     }
 
     public static function requireNonEmpty(string $label, string $value): void

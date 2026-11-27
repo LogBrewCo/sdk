@@ -1089,7 +1089,7 @@
       },
       "method": "Plain PHP request handling under the PHP built-in server: per request, LogBrewHttpRequestTelemetry from the incoming traceparent, the documented client context for service, environment, and release, LogBrewTelemetry with the request user, LogBrewPsrLogger, an issue from IssueDiagnostics::fromThrowable for the thrown error, finishSpanAndMetric, and shutdown through HttpTransport; one request that succeeds and one that throws; the package's framework bridges are Symfony and Laravel, and plain PHP has no framework that catches errors, so the documented helpers are the capture path",
       "probe": "tools/capture-matrix/probes/php/logbrew-php",
-      "inputs": "7ed17e55bf0178267933bf1f9f97da1ce835d95575751f17f24364659c86ee0a"
+      "inputs": "9c93a792c798e8ad3284862171373c1b0d51bfec63d6cf3f9e0f3bfeb73e3b80"
     },
     "python/logbrew_django": {
       "share": 100.0,
@@ -1119,7 +1119,7 @@
       },
       "method": "Django 5.2 project with LogBrewDjangoMiddleware first, configure_logbrew with an HttpTransport and capture_request_metrics, LogBrewLoggingHandler on the app logger, and a later middleware that calls set_logbrew_user; one request that succeeds and one that raises, through Django's test client and WSGI handler",
       "probe": "tools/capture-matrix/probes/python/logbrew_django",
-      "inputs": "4153e089aa191f5c72ad951211432989d8912ef7df1e193a5a51e472d0278da9"
+      "inputs": "99a91b7cdb5e302fe298b457abe1407d7baf7a58d723ef9ca4431b6ad633490c"
     },
     "python/logbrew_fastapi": {
       "share": 100.0,
@@ -1149,7 +1149,7 @@
       },
       "method": "FastAPI app with init_logbrew, an HttpTransport, capture_request_metrics, the returned logging handler on the app logger, and set_logbrew_user in a dependency; one request that succeeds and one that raises, through Starlette's TestClient with the app lifespan",
       "probe": "tools/capture-matrix/probes/python/logbrew_fastapi",
-      "inputs": "f7f32cb649c244f0278e3c13fec0d6b7d84e54fc96b66a5ae833233c7225f1fc"
+      "inputs": "7eeab988b037bb82827fd4ce21e269450e393f98970dce6259d164718af97b44"
     },
     "python/logbrew_flask": {
       "share": 100.0,
@@ -1179,7 +1179,7 @@
       },
       "method": "Flask 3 app with init_logbrew, an HttpTransport, capture_request_metrics, LogBrewLoggingHandler on app.logger, and set_logbrew_user in a before_request hook; one request that succeeds and one that raises, through Werkzeug's test client",
       "probe": "tools/capture-matrix/probes/python/logbrew_flask",
-      "inputs": "8de22113c28e422e1c044528b9a4e5629b115fb861a399738fee4097526132f3"
+      "inputs": "e4cc5eb5a25ebc7f102cdeea85790bfdbaa781e52618f1d6083f45d7c34a3435"
     },
     "python/logbrew_py": {
       "share": 100.0,
@@ -1207,7 +1207,7 @@
       },
       "method": "LogBrewClient with HttpTransport and a documented session context, LogBrewLoggingHandler on a stdlib logger, use_logbrew_trace from an incoming traceparent with set_logbrew_user, a span from span_attributes_from_trace_context, an explicit metric, and an issue from create_issue_attributes_from_exception for a raised error; the core has no framework hooks, so its documented API is the capture path",
       "probe": "tools/capture-matrix/probes/python/logbrew_py",
-      "inputs": "d13f6df42e64854b36bc884e17258b4509a7d11907e1d709a3b4c2ecb9e843c6"
+      "inputs": "263d52e9a65f6a097183f5653e67a3dd67565b5e2814ac9d31b16a017999ea7c"
     },
     "ruby/logbrew-ruby": {
       "share": 72.7,
@@ -1242,7 +1242,7 @@
       },
       "method": "Rails 8.1 app with the gem's automatic Railtie (LOGBREW_SERVER_API_KEY, LOGBREW_ENDPOINT, LOGBREW_CAPTURE_RAILS_LOGS), an ActionController around_action that sets the user through LogBrew::Telemetry.with_context, and Rails.logger calls; one request that succeeds and one that raises, through the full Rails middleware stack with Rack::MockRequest",
       "probe": "tools/capture-matrix/probes/ruby/logbrew-ruby",
-      "inputs": "5fa8b05d28b149c7e2d385e4ca0099db639675c8b46efdacc911d26dc0142f3c"
+      "inputs": "b524eacb13045cd84f09e542e9e71acc4956eb9b8baa65df37692ea4d1585e05"
     },
     "rust/logbrew": {
       "share": 81.8,

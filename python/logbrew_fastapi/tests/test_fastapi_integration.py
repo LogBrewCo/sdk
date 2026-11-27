@@ -24,6 +24,7 @@ from logbrew_sdk import (
     LogBrewLoggingHandler,
     RecordingTransport,
     SdkError,
+    TransportResponse,
     cache_operation_with_logbrew_span,
     set_logbrew_user,
 )
@@ -361,6 +362,21 @@ class FastAPIIntegrationTests(unittest.TestCase):
             self.assertEqual(event["attributes"]["context"]["resource"]["deployment"]["environment"], "development")
         self.assertNotIn(api_key, repr(runtime))
         self.assertNotIn(api_key, json.dumps(payload))
+
+    def test_init_logbrew_without_key_reads_server_api_key_variable(self) -> None:
+        sent_keys: list[str] = []
+
+        class KeyRecordingTransport:
+            def send(self, api_key: str, body: str) -> TransportResponse:
+                sent_keys.append(api_key)
+                return TransportResponse(status_code=202, attempts=1)
+
+        with patch.dict(os.environ, {"LOGBREW_SERVER_API_KEY": "env-server-key"}):
+            runtime = init_logbrew(FastAPI(), transport=KeyRecordingTransport(), automatic_delivery=False)
+        runtime.client.log("evt_fastapi_key_001", "2026-11-27T10:00:00Z", {"message": "first event", "level": "info"})
+        runtime.client.flush()
+
+        self.assertEqual(sent_keys, ["env-server-key"])
 
     def test_init_logbrew_reads_environment_and_release_variables_unless_explicit(self) -> None:
         cases = (

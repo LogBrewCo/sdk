@@ -185,7 +185,7 @@ def _deployment_context(environment: str | None) -> TelemetryContext | None:
 def init_logbrew(
     app: FastAPI,
     *,
-    api_key: str,
+    api_key: str | None = None,
     service_name: str = "fastapi",
     environment: str | None = None,
     transport: Transport | None = None,

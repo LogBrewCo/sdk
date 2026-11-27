@@ -289,6 +289,7 @@ METRIC_KINDS = set(METRIC_TEMPORALITIES_BY_KIND)
 NON_NEGATIVE_METRIC_KINDS = {"counter", "histogram"}
 MAX_METRIC_DESCRIPTION_LENGTH = 1_024
 DEFAULT_HTTP_ENDPOINT = "https://api.logbrew.co/v1/events"
+SERVER_API_KEY_VARIABLE = "LOGBREW_SERVER_API_KEY"
 _HTTP_USER_AGENT_PRODUCT = "logbrew-sdk-python"
 DEFAULT_MAX_QUEUE_SIZE = 10_000
 DEFAULT_MAX_QUEUE_BYTES = 4 * 1024 * 1024
@@ -508,7 +509,7 @@ class LogBrewClient:
     def create(
         cls,
         *,
-        api_key: str,
+        api_key: str | None = None,
         sdk_name: str | None = None,
         sdk_version: str | None = None,
         context: TelemetryContext | None = None,
@@ -527,8 +528,11 @@ class LogBrewClient:
         on_event_dropped: Callable[[EventDrop], None] | None = None,
         breadcrumbs: bool = True,
     ) -> LogBrewClient:
-        """Create a client from public SDK identity, retry, and API key settings."""
-        require_non_empty("api_key", api_key)
+        """Create a client from public SDK identity, retry, and API key settings.
+
+        Without a non-empty ``api_key``, the client reads ``LOGBREW_SERVER_API_KEY``.
+        """
+        api_key = resolve_server_api_key(api_key)
         if sdk_name is None:
             sdk_name = "logbrew-sdk"
         if sdk_version is None:
@@ -1650,6 +1654,14 @@ def _default_http_ssl_context() -> ssl.SSLContext:
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.load_verify_locations(certifi.where())
     return context
+
+
+def resolve_server_api_key(api_key: str | None) -> str:
+    """Return the explicit key, else ``LOGBREW_SERVER_API_KEY``, else raise a configuration error."""
+    for candidate in (api_key, os.environ.get(SERVER_API_KEY_VARIABLE)):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    raise SdkError("configuration_error", f"set {SERVER_API_KEY_VARIABLE} or pass api_key")
 
 
 def require_non_empty(label: str, value: Any) -> None:
