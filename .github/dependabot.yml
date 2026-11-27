@@ -88,6 +88,9 @@ updates:
       # typescript-eslint supports TypeScript 7.
       - dependency-name: typescript
         versions: [">= 6.1"]
+      # vsce refuses a @types/vscode newer than engines.vscode in
+      # apps/vscode/package.json, so raise both together by hand.
+      - dependency-name: "@types/vscode"
   - package-ecosystem: bundler
     directories:
       - /ruby/logbrew-ruby
