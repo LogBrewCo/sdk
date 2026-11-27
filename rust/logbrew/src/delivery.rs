@@ -18,6 +18,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use queue::{DeliveryQueue, FrozenPrefix, QueueAdmissionError, REQUEST_SUFFIX, serialize_bounded};
 use serde_json::{Map, Value};
+use std::env;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
@@ -44,6 +45,9 @@ pub const DEFAULT_AUTOMATIC_RETRY_BASE_DELAY: Duration = Duration::from_secs(5);
 
 /// Longest retry delay between failed automatic deliveries.
 pub const DEFAULT_AUTOMATIC_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+
+/// Environment variable a client reads when its builder has no non-empty API key.
+pub const SERVER_API_KEY_VARIABLE: &str = "LOGBREW_SERVER_API_KEY";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Configuration for an explicit client-owned automatic delivery worker.
@@ -236,6 +240,9 @@ impl fmt::Debug for ClientBuilder {
 
 impl ClientBuilder {
     /// Set the API key used by flush and shutdown transport calls.
+    ///
+    /// Without a non-empty key, [`ClientBuilder::build`] reads
+    /// [`SERVER_API_KEY_VARIABLE`].
     #[must_use]
     #[inline]
     pub fn api_key<ApiKey>(mut self, api_key: ApiKey) -> Self
@@ -275,10 +282,7 @@ impl ClientBuilder {
         self,
         automatic: Option<Arc<AutomaticDelivery>>,
     ) -> Result<LogBrewClient, SdkError> {
-        let api_key = self
-            .api_key
-            .ok_or_else(|| SdkError::new("config_error", "api_key is required"))?;
-        require_non_empty("api_key", &api_key)?;
+        let api_key = resolve_server_api_key(self.api_key)?;
         require_non_empty("sdk name", &self.sdk_name)?;
         require_non_empty("sdk version", &self.sdk_version)?;
         validate_limit("max_queue_events", self.max_queue_events)?;
@@ -1553,6 +1557,19 @@ fn validate_deadline(name: &str, value: Duration) -> Result<(), SdkError> {
         ));
     }
     Ok(())
+}
+
+fn resolve_server_api_key(explicit: Option<String>) -> Result<String, SdkError> {
+    explicit
+        .into_iter()
+        .chain(env::var(SERVER_API_KEY_VARIABLE).ok())
+        .find(|key| !key.trim().is_empty())
+        .ok_or_else(|| {
+            SdkError::new(
+                "config_error",
+                format!("set {SERVER_API_KEY_VARIABLE} or pass api_key"),
+            )
+        })
 }
 
 fn request_prefix(sdk_json: &[u8]) -> Result<Vec<u8>, SdkError> {

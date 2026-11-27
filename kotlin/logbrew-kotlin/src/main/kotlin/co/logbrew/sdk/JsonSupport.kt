@@ -37,6 +37,12 @@ internal class OrderedJsonObject {
 }
 
 internal object Validation {
+    private const val SERVER_API_KEY_VARIABLE = "LOGBREW_SERVER_API_KEY"
+
+    fun resolveServerApiKey(apiKey: String?): String =
+        listOf(apiKey, System.getenv(SERVER_API_KEY_VARIABLE)).firstOrNull { !it.isNullOrBlank() }
+            ?: throw SdkException("configuration_error", "set $SERVER_API_KEY_VARIABLE or pass apiKey")
+
     fun requireNonEmpty(
         label: String,
         value: String,

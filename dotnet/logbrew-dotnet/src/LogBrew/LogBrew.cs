@@ -731,8 +731,9 @@ namespace LogBrew
             delivery.StartOwnedDelivery();
         }
 
+        /// <summary>Creates a client. A null or blank apiKey reads LOGBREW_SERVER_API_KEY.</summary>
         public static LogBrewClient Create(
-            string apiKey,
+            string? apiKey,
             string sdkName,
             string sdkVersion,
             int maxRetries = 2,
@@ -740,7 +741,7 @@ namespace LogBrew
             Action<DroppedEvent>? onEventDropped = null,
             int maxQueueBytes = DefaultMaxQueueBytes)
         {
-            ValidateClientOptions(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, maxQueueBytes);
+            apiKey = ValidateClientOptions(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, maxQueueBytes);
             return new LogBrewClient(
                 apiKey,
                 sdkName,
@@ -756,7 +757,7 @@ namespace LogBrew
 
         /// <summary>Creates a client with explicit shared-context options.</summary>
         public static LogBrewClient Create(
-            string apiKey,
+            string? apiKey,
             string sdkName,
             string sdkVersion,
             LogBrewClientOptions clientOptions,
@@ -766,7 +767,7 @@ namespace LogBrew
             int maxQueueBytes = DefaultMaxQueueBytes)
         {
             ExceptionContract.ThrowIfNull(clientOptions, nameof(clientOptions));
-            ValidateClientOptions(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, maxQueueBytes);
+            apiKey = ValidateClientOptions(apiKey, sdkName, sdkVersion, maxRetries, maxQueueSize, maxQueueBytes);
             return new LogBrewClient(
                 apiKey,
                 sdkName,
@@ -781,7 +782,7 @@ namespace LogBrew
         }
 
         public static LogBrewClient CreateAutomatic(
-            string apiKey,
+            string? apiKey,
             string sdkName,
             string sdkVersion,
             ITransport transport,
@@ -800,7 +801,7 @@ namespace LogBrew
 
         /// <summary>Creates an automatic client with explicit shared-context options.</summary>
         public static LogBrewClient CreateAutomatic(
-            string apiKey,
+            string? apiKey,
             string sdkName,
             string sdkVersion,
             LogBrewClientOptions clientOptions,
@@ -815,7 +816,7 @@ namespace LogBrew
             }
 
             var settings = (options ?? new AutomaticDeliveryOptions()).ValidateAndCopy();
-            ValidateClientOptions(
+            apiKey = ValidateClientOptions(
                 apiKey,
                 sdkName,
                 sdkVersion,
@@ -837,7 +838,7 @@ namespace LogBrew
 
 #if NET8_0_OR_GREATER
         public static LogBrewClient CreateAutomaticDurable(
-            string apiKey,
+            string? apiKey,
             string sdkName,
             string sdkVersion,
             ITransport transport,
@@ -858,7 +859,7 @@ namespace LogBrew
 
         /// <summary>Creates a durable automatic client with explicit shared-context options.</summary>
         public static LogBrewClient CreateAutomaticDurable(
-            string apiKey,
+            string? apiKey,
             string sdkName,
             string sdkVersion,
             LogBrewClientOptions clientOptions,
@@ -879,7 +880,7 @@ namespace LogBrew
             }
 
             var settings = (options ?? new AutomaticDeliveryOptions()).ValidateAndCopy();
-            ValidateClientOptions(
+            apiKey = ValidateClientOptions(
                 apiKey,
                 sdkName,
                 sdkVersion,
@@ -1022,15 +1023,15 @@ namespace LogBrew
             delivery.Enqueue(new Event(type, timestamp, id, attributes));
         }
 
-        private static void ValidateClientOptions(
-            string apiKey,
+        private static string ValidateClientOptions(
+            string? apiKey,
             string sdkName,
             string sdkVersion,
             int maxRetries,
             int maxQueueSize,
             int maxQueueBytes)
         {
-            Validation.RequireNonEmpty("api_key", apiKey);
+            var resolvedApiKey = Validation.ResolveServerApiKey(apiKey);
             Validation.RequireNonEmpty("sdk_name", sdkName);
             Validation.RequireNonEmpty("sdk_version", sdkVersion);
             if (maxRetries < 0)
@@ -1047,6 +1048,8 @@ namespace LogBrew
             {
                 throw new SdkException("validation_error", "max_queue_bytes must be positive");
             }
+
+            return resolvedApiKey;
         }
     }
 
@@ -1134,6 +1137,24 @@ namespace LogBrew
     internal static class Validation
     {
         private static readonly char[] TimestampSeparator = { 'T' };
+
+        internal const string ServerApiKeyVariable = "LOGBREW_SERVER_API_KEY";
+
+        internal static string ResolveServerApiKey(string? apiKey)
+        {
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                return apiKey!;
+            }
+
+            var environmentKey = System.Environment.GetEnvironmentVariable(ServerApiKeyVariable);
+            if (!string.IsNullOrWhiteSpace(environmentKey))
+            {
+                return environmentKey!;
+            }
+
+            throw new SdkException("configuration_error", "set " + ServerApiKeyVariable + " or pass apiKey");
+        }
 
         internal static void RequireNonEmpty(string label, string? value)
         {

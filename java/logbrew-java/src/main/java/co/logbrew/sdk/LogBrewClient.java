@@ -69,7 +69,7 @@ public final class LogBrewClient {
         TelemetryContext clientContext,
         boolean disableRuntimeContext
     ) {
-        this.apiKey = apiKey;
+        this.apiKey = Validation.resolveServerApiKey(apiKey);
         this.context = TelemetryContext.merge(
             disableRuntimeContext ? null : TelemetryContext.runtimeDefaults(),
             clientContext
@@ -109,7 +109,8 @@ public final class LogBrewClient {
     }
 
     /**
-     * Creates a client from public SDK identity and API key settings.
+     * Creates a client from public SDK identity and API key settings. Every factory reads
+     * {@code LOGBREW_SERVER_API_KEY} when {@code apiKey} is null or blank.
      */
     public static LogBrewClient create(String apiKey, String sdkName, String sdkVersion) {
         return create(apiKey, sdkName, sdkVersion, DeliveryOptions.builder().build());
@@ -178,7 +179,6 @@ public final class LogBrewClient {
         String sdkVersion,
         DeliveryOptions deliveryOptions
     ) {
-        Validation.requireNonEmpty("api_key", apiKey);
         Validation.requireNonEmpty("sdk_name", sdkName);
         Validation.requireNonEmpty("sdk_version", sdkVersion);
         return new LogBrewClient(
@@ -203,7 +203,6 @@ public final class LogBrewClient {
         String sdkVersion,
         LogBrewClientOptions options
     ) {
-        Validation.requireNonEmpty("api_key", apiKey);
         Validation.requireNonEmpty("sdk_name", sdkName);
         Validation.requireNonEmpty("sdk_version", sdkVersion);
         LogBrewClientOptions validated = Objects.requireNonNull(options, "options");
@@ -252,7 +251,6 @@ public final class LogBrewClient {
         DeliveryOptions deliveryOptions,
         AutomaticDeliveryOptions automaticDeliveryOptions
     ) {
-        Validation.requireNonEmpty("api_key", apiKey);
         Validation.requireNonEmpty("sdk_name", sdkName);
         Validation.requireNonEmpty("sdk_version", sdkVersion);
         return new LogBrewClient(
@@ -297,7 +295,6 @@ public final class LogBrewClient {
         LogBrewClientOptions options,
         AutomaticDeliveryOptions automaticDeliveryOptions
     ) {
-        Validation.requireNonEmpty("api_key", apiKey);
         Validation.requireNonEmpty("sdk_name", sdkName);
         Validation.requireNonEmpty("sdk_version", sdkVersion);
         LogBrewClientOptions validated = Objects.requireNonNull(options, "options");
@@ -327,7 +324,6 @@ public final class LogBrewClient {
         AutomaticDeliveryScheduler.Jitter jitter,
         BooleanSupplier processOwnership
     ) {
-        Validation.requireNonEmpty("api_key", apiKey);
         Validation.requireNonEmpty("sdk_name", sdkName);
         Validation.requireNonEmpty("sdk_version", sdkVersion);
         return new LogBrewClient(

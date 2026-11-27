@@ -267,9 +267,10 @@ class LogBrewClient private constructor(
         const val DEFAULT_MAX_QUEUE_EVENTS = 1_000
         const val DEFAULT_MAX_QUEUE_BYTES = 4L * 1024 * 1024
 
+        /** Creates a client. A null or blank [apiKey] reads `LOGBREW_SERVER_API_KEY`. */
         @JvmOverloads
         fun create(
-            apiKey: String,
+            apiKey: String? = null,
             sdkName: String,
             sdkVersion: String,
             maxRetries: Int = 2,
@@ -279,7 +280,7 @@ class LogBrewClient private constructor(
             maxQueueBytes: Long = DEFAULT_MAX_QUEUE_BYTES,
             onEventDropped: ((EventDrop) -> Unit)? = null,
         ): LogBrewClient {
-            Validation.requireNonEmpty("api_key", apiKey)
+            val resolvedApiKey = Validation.resolveServerApiKey(apiKey)
             Validation.requireNonEmpty("sdk_name", sdkName)
             Validation.requireNonEmpty("sdk_version", sdkVersion)
             if (maxRetries < 0) {
@@ -293,7 +294,16 @@ class LogBrewClient private constructor(
                     if (includeAutomaticContext) automaticTelemetryContext() else null,
                     context,
                 )
-            return LogBrewClient(apiKey, sdkName, sdkVersion, maxRetries, baseContext, maxQueueEvents, maxQueueBytes, onEventDropped)
+            return LogBrewClient(
+                resolvedApiKey,
+                sdkName,
+                sdkVersion,
+                maxRetries,
+                baseContext,
+                maxQueueEvents,
+                maxQueueBytes,
+                onEventDropped,
+            )
         }
     }
 }

@@ -155,6 +155,24 @@ private func normalizeMetricDescription(_ value: String) throws -> String {
     return normalized
 }
 
+let serverAPIKeyVariable = "LOGBREW_SERVER_API_KEY"
+
+/// Returns a non-empty explicit key. Server platforms then read `LOGBREW_SERVER_API_KEY`; mobile apps never do.
+func resolveServerAPIKey(_ apiKey: String?) throws -> String {
+    let isPresent = { (key: String) in !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    if let apiKey, isPresent(apiKey) {
+        return apiKey
+    }
+    #if os(macOS) || os(Linux) || os(Windows)
+        if let environmentKey = ProcessInfo.processInfo.environment[serverAPIKeyVariable], isPresent(environmentKey) {
+            return environmentKey
+        }
+        throw SdkError(code: "configuration_error", message: "set \(serverAPIKeyVariable) or pass apiKey")
+    #else
+        throw SdkError(code: "validation_error", message: "api_key must be non-empty")
+    #endif
+}
+
 func requireNonEmpty(_ label: String, _ value: String) throws {
     if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         throw SdkError(code: "validation_error", message: "\(label) must be non-empty")

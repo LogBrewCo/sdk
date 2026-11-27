@@ -5,6 +5,8 @@ import java.util.Locale;
 import java.util.Map;
 
 final class Validation {
+    static final String SERVER_API_KEY_VARIABLE = "LOGBREW_SERVER_API_KEY";
+
     private static final String[] BLOCKED_DEPENDENCY_METADATA_KEYS = {
         "args",
         "arguments",
@@ -40,6 +42,17 @@ final class Validation {
     };
 
     private Validation() {
+    }
+
+    static String resolveServerApiKey(String apiKey) {
+        if (apiKey != null && !apiKey.trim().isEmpty()) {
+            return apiKey;
+        }
+        String environmentKey = System.getenv(SERVER_API_KEY_VARIABLE);
+        if (environmentKey != null && !environmentKey.trim().isEmpty()) {
+            return environmentKey;
+        }
+        throw new SdkException("configuration_error", "set " + SERVER_API_KEY_VARIABLE + " or pass apiKey");
     }
 
     static void requireNonEmpty(String label, String value) {

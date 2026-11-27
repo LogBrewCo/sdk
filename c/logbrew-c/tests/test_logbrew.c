@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200112L
+
 #include "logbrew.h"
 
 #include <math.h>
@@ -89,6 +91,52 @@ static void flush_success_clears_queue(void) {
   EXPECT_TRUE(logbrew_recording_transport_last_body(&recorder) != NULL);
   logbrew_recording_transport_free(&recorder);
   logbrew_client_free(client);
+}
+
+static LogBrewStatus record_api_key(
+    void *user_data,
+    const char *api_key,
+    const char *body,
+    LogBrewTransportResponse *response,
+    LogBrewError *error) {
+  (void)body;
+  (void)error;
+  (void)snprintf((char *)user_data, 64U, "%s", api_key);
+  response->status_code = 202;
+  response->attempts = 1U;
+  return LOGBREW_OK;
+}
+
+static void expect_sent_api_key(const char *explicit_key, const char *expected_key) {
+  LogBrewClient *client = NULL;
+  LogBrewError error;
+  LogBrewTransportResponse response;
+  char sent_key[64] = "";
+  LogBrewTransport transport = {record_api_key, sent_key};
+  LogBrewConfig config = {explicit_key, "logbrew-c-test", "1.0.0", 0U};
+  LogBrewLogAttributes attributes = {"first event", "info", NULL};
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_client_new(config, &client, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_log(client, "evt_server_key_001", "2026-11-27T10:00:00Z", attributes, &error) == LOGBREW_OK);
+  EXPECT_TRUE(logbrew_client_flush(client, transport, &response, &error) == LOGBREW_OK);
+  EXPECT_TRUE(strcmp(sent_key, expected_key) == 0);
+  logbrew_client_free(client);
+}
+
+static void server_api_key_variable_is_the_fallback(void) {
+  LogBrewClient *client = NULL;
+  LogBrewError error;
+  LogBrewConfig config = {NULL, "logbrew-c-test", "1.0.0", 0U};
+  EXPECT_TRUE(setenv("LOGBREW_SERVER_API_KEY", "env-server-key", 1) == 0);
+  expect_sent_api_key(NULL, "env-server-key");
+  expect_sent_api_key("explicit-key", "explicit-key");
+  EXPECT_TRUE(setenv("LOGBREW_SERVER_API_KEY", " ", 1) == 0);
+  logbrew_error_clear(&error);
+  EXPECT_TRUE(logbrew_client_new(config, &client, &error) == LOGBREW_CONFIG_ERROR);
+  EXPECT_TRUE(client == NULL);
+  EXPECT_TRUE(strcmp(error.code, "configuration_error") == 0);
+  EXPECT_TRUE(strstr(error.message, "LOGBREW_SERVER_API_KEY") != NULL);
+  EXPECT_TRUE(unsetenv("LOGBREW_SERVER_API_KEY") == 0);
 }
 
 typedef struct {
@@ -727,6 +775,7 @@ int main(void) {
   opentelemetry_span_context_helpers_create_child_context();
   http_client_span_helpers_create_child_propagation();
   flush_success_clears_queue();
+  server_api_key_variable_is_the_fallback();
   empty_flush_is_no_op();
   bounded_queue_counts_newest_drops_with_reasons();
   reentrant_drop_callback_is_not_repeated();
