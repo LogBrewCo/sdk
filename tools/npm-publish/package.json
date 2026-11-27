@@ -9,7 +9,7 @@
     "minimatch": "11.0.3"
   },
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "@types/libnpmpublish": "11.2.0"
   }
 }

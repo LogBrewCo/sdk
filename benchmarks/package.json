@@ -10,9 +10,9 @@
   "dependencies": {
     "@logbrew/browser": "0.1.22",
     "@logbrew/node": "0.1.30",
-    "@logbrew/sdk": "0.1.45",
-    "@sentry/browser": "11.14.0",
-    "@sentry/node": "11.14.0",
+    "@logbrew/sdk": "0.1.47",
+    "@sentry/browser": "11.16.0",
+    "@sentry/node": "11.16.0",
     "esbuild": "0.28.2",
     "web-vitals": "6.2.3"
   },
