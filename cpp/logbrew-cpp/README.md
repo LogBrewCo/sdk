@@ -10,10 +10,11 @@ Public C++17 SDK for building, validating, previewing, and sending LogBrew event
 
 The core SDK is dependency-free and exports the `LogBrew::LogBrew` target.
 If you set up with the LogBrew CLI, update it through the same package manager
-to version 0.1.39 or newer. Homebrew needs both tap refresh and
-upgrade:
+to version 0.1.39 or newer. Homebrew 6 and later need the formula trusted
+before the tap refresh and upgrade:
 
 ```bash
+brew trust --formula LogBrewCo/tap/logbrew
 brew update && brew upgrade LogBrewCo/tap/logbrew
 logbrew version --json
 logbrew setup --json
