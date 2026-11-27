@@ -175,9 +175,9 @@ config = "the phpstan.neon the script writes"
 conflicts = "none known"
 exceptions = "none"
 runtime = "2026-10-19 to 2026-11-19: the CI step was skipped in 198 runs and failed in 2; local run 35 s with a cold Composer cache"
-findings = "2026-11-19: the 2 CI failures were Composer refusing symfony/framework-bundle 8.1.9 (advisory PKSA-jvt1-tggb-8w72); the script now installs Symfony 8.1.11, Guzzle 7.16.3, and Monolog 3.13.0, and PHPStan 2.3.6 at level max finds 0 errors"
+findings = "2026-11-19: the 2 CI failures were Composer refusing symfony/framework-bundle 8.1.9 (advisory PKSA-jvt1-tggb-8w72). 2026-11-27: Composer refused 8.1.11 (advisories PKSA-npfz-gx1q-56m6, PKSA-y4cd-vht6-nc2m, PKSA-6hr5-x8r3-djyd); the script now installs Symfony 8.1.12, Guzzle 7.16.3, and Monolog 3.13.0, and PHPStan 2.3.6 at level max finds 0 errors"
 replaces = "none"
-checked = 2026-11-19
+checked = 2026-11-27
 
 [[tool]]
 id = "swift-style"
