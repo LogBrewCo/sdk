@@ -549,7 +549,7 @@ expected_docs = (
     ("SpanAttributes", logbrew_sdk.SpanAttributes, "Public span event attributes."),
     ("ActionAttributes", logbrew_sdk.ActionAttributes, "Public action event attributes."),
     ("LogBrewClient", logbrew_sdk.LogBrewClient, "Buffered public client for validating, previewing, and flushing LogBrew events."),
-    ("LogBrewClient.create", logbrew_sdk.LogBrewClient.create, "Create a client from public SDK identity, retry, and API key settings."),
+    ("LogBrewClient.create", logbrew_sdk.LogBrewClient.create, "Create a client from public SDK identity, retry, and API key settings.\n\nWithout a non-empty ``api_key``, the client reads ``LOGBREW_SERVER_API_KEY``."),
     ("RecordingTransport", logbrew_sdk.RecordingTransport, "Scripted transport for previewing, accepting, or failing queued event flushes."),
     ("HttpTransport", logbrew_sdk.HttpTransport, "HTTP transport for sending queued batches with portable TLS verification." + read_back_note),
     ("HttpTransport.send", logbrew_sdk.HttpTransport.send, "POST one serialized event batch and return the HTTP status."),
