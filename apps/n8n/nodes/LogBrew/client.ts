@@ -44,7 +44,7 @@ const pollPages = 20;
 const okStatus = 200;
 const noHttpStatus = 0;
 const sdkName = "n8n-nodes-logbrew";
-const sdkVersion = "0.1.2";
+const sdkVersion = "0.1.3";
 const levels: readonly Level[] = ["debug", "info", "warning", "error", "critical"];
 
 class LogBrewError extends Error {

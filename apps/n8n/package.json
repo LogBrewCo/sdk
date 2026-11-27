@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-logbrew",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "LogBrew nodes for n8n. Start workflows on new issues and fired alerts, send logs, and resolve issues.",
   "license": "MIT",
   "homepage": "https://logbrew.co",

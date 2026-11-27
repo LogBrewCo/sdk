@@ -226,7 +226,7 @@ test("node sends a log with the ingest key", async () => {
       project_id: projectId,
       release: "workflow",
       sdk_name: "n8n-nodes-logbrew",
-      sdk_version: "0.1.2",
+      sdk_version: "0.1.3",
       service_name: "n8n",
     },
     log: {
