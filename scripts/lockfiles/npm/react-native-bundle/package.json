@@ -2,8 +2,8 @@
   "name": "react-native-bundle",
   "private": true,
   "dependencies": {
-    "@babel/core": "8.1.2",
-    "@babel/runtime": "8.1.2",
+    "@babel/core": "8.1.3",
+    "@babel/runtime": "8.1.3",
     "@react-native-community/cli": "21.0.0",
     "@react-native-community/cli-platform-android": "21.0.0",
     "@react-native/babel-preset": "0.88.1",
