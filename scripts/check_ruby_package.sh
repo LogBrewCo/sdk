@@ -12,6 +12,7 @@ find "$package_dir" -name '*.rb' -not -path '*/.bundle/*' -print0 | while IFS= r
 done
 
 (cd "$package_dir" && ruby tests/run.rb)
+(cd "$package_dir" && ruby tests/server_api_key.rb)
 (cd "$package_dir" && ruby tests/issue_diagnostics.rb)
 (cd "$package_dir" && ruby tests/telemetry_context.rb)
 (cd "$package_dir" && ruby tests/rails_integration.rb)

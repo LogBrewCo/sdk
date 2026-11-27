@@ -901,10 +901,13 @@ module LogBrew
     DEFAULT_AUTOMATIC_RETRY_BASE_DELAY = 0.25
     DEFAULT_AUTOMATIC_RETRY_MAX_DELAY = 30.0
 
+    SERVER_API_KEY_VARIABLE = "LOGBREW_SERVER_API_KEY"
+
+    # A nil or blank api_key reads LOGBREW_SERVER_API_KEY.
     def self.create(
-      api_key:,
       sdk_name:,
       sdk_version:,
+      api_key: nil,
       max_retries: 2,
       max_queue_size: BoundedEventQueue::DEFAULT_MAX_SIZE,
       max_queue_bytes: BoundedEventQueue::DEFAULT_MAX_BYTES,
@@ -915,7 +918,7 @@ module LogBrew
       context: nil,
       capture_runtime_context: true
     )
-      Validation.require_non_empty("api_key", api_key)
+      api_key = resolve_server_api_key(api_key)
       Validation.require_non_empty("sdk_name", sdk_name)
       Validation.require_non_empty("sdk_version", sdk_version)
       raise SdkError.new("validation_error", "max_retries must be non-negative") if max_retries.negative?
@@ -951,10 +954,10 @@ module LogBrew
     end
 
     def self.create_automatic(
-      api_key:,
       sdk_name:,
       sdk_version:,
       transport:,
+      api_key: nil,
       flush_interval: DEFAULT_AUTOMATIC_FLUSH_INTERVAL,
       flush_threshold: DEFAULT_AUTOMATIC_FLUSH_THRESHOLD,
       retry_base_delay: DEFAULT_AUTOMATIC_RETRY_BASE_DELAY,
@@ -986,6 +989,12 @@ module LogBrew
       )
       client
     end
+
+    def self.resolve_server_api_key(api_key)
+      [api_key, ENV.fetch(SERVER_API_KEY_VARIABLE, nil)].find { |key| key.is_a?(String) && !key.strip.empty? } ||
+        raise(SdkError.new("configuration_error", "set #{SERVER_API_KEY_VARIABLE} or pass api_key"))
+    end
+    private_class_method :resolve_server_api_key
 
     def initialize(
       api_key:,
