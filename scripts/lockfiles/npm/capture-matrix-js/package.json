@@ -6,7 +6,7 @@
     "@angular/compiler": "22.3.0",
     "@angular/core": "22.3.0",
     "@angular/platform-browser": "22.3.0",
-    "@aws-sdk/client-sqs": "3.1172.0",
+    "@aws-sdk/client-sqs": "3.1173.0",
     "@nestjs/common": "12.5.1",
     "@nestjs/core": "12.5.1",
     "@nestjs/platform-express": "12.5.1",
@@ -29,7 +29,7 @@
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "svelte": "5.58.0",
-    "vue": "3.5.45"
+    "vue": "3.5.46"
   },
   "overrides": {
     "effect": "3.22.5"
