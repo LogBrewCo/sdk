@@ -5,6 +5,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <iomanip>
 #include <memory>
@@ -146,6 +147,17 @@ void require_valid_trace_context(const TraceContext &context) {
                      return std::isspace(character) != 0;
                    }).base();
   return std::string(begin, end);
+}
+
+std::string resolve_server_api_key(std::string api_key) {
+  if (!is_blank(api_key)) {
+    return api_key;
+  }
+  const char *environment_key = std::getenv(server_api_key_variable);
+  if (environment_key != nullptr && !is_blank(environment_key)) {
+    return environment_key;
+  }
+  throw SdkException("configuration_error", std::string("set ") + server_api_key_variable + " or pass api_key");
 }
 
 void require_non_empty(const std::string &label, const std::string &value) {
@@ -1776,11 +1788,10 @@ const std::string *RecordingTransport::last_body() const noexcept {
 LogBrewClient::LogBrewClient(Config config) : LogBrewClient(std::move(config), ClientOptions{}) {}
 
 LogBrewClient::LogBrewClient(Config config, ClientOptions options)
-    : api_key_(std::move(config.api_key)), sdk_name_(std::move(config.sdk_name)),
+    : api_key_(resolve_server_api_key(std::move(config.api_key))), sdk_name_(std::move(config.sdk_name)),
       sdk_version_(std::move(config.sdk_version)), max_retries_(config.max_retries == 0U ? 2U : config.max_retries),
       max_queue_events_(options.max_queue_events), max_queue_bytes_(options.max_queue_bytes),
       on_event_dropped_(std::move(options.on_event_dropped)) {
-  require_non_empty("api_key", api_key_);
   if (max_queue_events_ == 0U || max_queue_bytes_ == 0U) {
     throw SdkException("validation_error", "queue bounds must be positive");
   }

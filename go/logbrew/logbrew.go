@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -258,7 +259,8 @@ func (t *HTTPTransport) sendWithRetryAfter(apiKey string, body []byte, maximum t
 // Config describes the public SDK identity, API key, and retry behavior for a
 // Go LogBrew client.
 type Config struct {
-	// APIKey is the public LogBrew API key sent to the transport.
+	// APIKey is the public LogBrew API key sent to the transport. Empty reads
+	// the ServerAPIKeyVariable environment variable.
 	APIKey string
 	// SDKName identifies the SDK in emitted payloads. Empty defaults to
 	// "logbrew-go".
@@ -368,9 +370,11 @@ func NewAutomaticClient(config Config, delivery AutomaticDeliveryConfig) (*Clien
 }
 
 func newClient(config Config, delivery *AutomaticDeliveryConfig) (*Client, error) {
-	if err := requireNonEmpty("api_key", config.APIKey); err != nil {
+	apiKey, err := resolveServerAPIKey(config.APIKey)
+	if err != nil {
 		return nil, err
 	}
+	config.APIKey = apiKey
 	if config.SDKName == "" {
 		config.SDKName = defaultSDKName
 	}
@@ -1024,6 +1028,19 @@ func hexValue(value byte) int {
 	default:
 		return -1
 	}
+}
+
+// ServerAPIKeyVariable is the environment variable a client reads when
+// Config.APIKey is empty.
+const ServerAPIKeyVariable = "LOGBREW_SERVER_API_KEY"
+
+func resolveServerAPIKey(explicit string) (string, error) {
+	for _, candidate := range []string{explicit, os.Getenv(ServerAPIKeyVariable)} {
+		if strings.TrimSpace(candidate) != "" {
+			return candidate, nil
+		}
+	}
+	return "", &SdkError{Code: "configuration_error", Message: "set " + ServerAPIKeyVariable + " or pass Config.APIKey"}
 }
 
 func requireNonEmpty(label, value string) error {

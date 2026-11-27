@@ -56,6 +56,9 @@ typedef struct {
   long timeout_ms;
 } LogBrewHttpTransport;
 
+/* A client reads this environment variable when LogBrewConfig.api_key is NULL or blank. */
+#define LOGBREW_SERVER_API_KEY_VARIABLE "LOGBREW_SERVER_API_KEY"
+
 typedef struct {
   const char *api_key;
   const char *sdk_name;

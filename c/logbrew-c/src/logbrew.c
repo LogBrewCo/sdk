@@ -656,10 +656,14 @@ LogBrewStatus logbrew_client_new_with_options(
     return LOGBREW_CONFIG_ERROR;
   }
   *out_client = NULL;
-  status = require_non_empty("api_key", config.api_key, error);
-  if (status == LOGBREW_OK) {
-    status = require_non_empty("sdk_name", config.sdk_name, error);
+  if (is_blank(config.api_key)) {
+    config.api_key = getenv(LOGBREW_SERVER_API_KEY_VARIABLE);
   }
+  if (is_blank(config.api_key)) {
+    set_error(error, "configuration_error", "set " LOGBREW_SERVER_API_KEY_VARIABLE " or pass api_key", false);
+    return LOGBREW_CONFIG_ERROR;
+  }
+  status = require_non_empty("sdk_name", config.sdk_name, error);
   if (status == LOGBREW_OK) {
     status = require_non_empty("sdk_version", config.sdk_version, error);
   }

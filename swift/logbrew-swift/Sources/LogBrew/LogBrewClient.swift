@@ -6,8 +6,9 @@ public final class LogBrewClient: @unchecked Sendable {
     private let breadcrumbStore = IssueBreadcrumbStore()
     private let appStart: AppStartRecorder?
 
+    /// Creates a client. On macOS and Linux, a nil or blank `apiKey` reads `LOGBREW_SERVER_API_KEY`.
     public static func create(
-        apiKey: String,
+        apiKey: String? = nil,
         sdkName: String,
         sdkVersion: String,
         maxRetries: Int = 2,
@@ -17,7 +18,7 @@ public final class LogBrewClient: @unchecked Sendable {
     ) throws -> LogBrewClient {
         try LogBrewClient(
             config: ClientConfig(
-                apiKey: apiKey,
+                apiKey: resolveServerAPIKey(apiKey),
                 sdkName: sdkName,
                 sdkVersion: sdkVersion,
                 maxRetries: maxRetries,

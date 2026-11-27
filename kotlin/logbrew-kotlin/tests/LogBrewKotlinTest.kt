@@ -27,9 +27,16 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-fun main() {
+fun main(args: Array<String>) {
+    if (args.isNotEmpty()) {
+        runServerApiKeyChild(args.single())
+        return
+    }
     run("preview_json_contains_all_supported_event_types", ::previewJsonContainsAllSupportedEventTypes)
     run("flush_success_clears_queue", ::flushSuccessClearsQueue)
+    run("client_without_key_sends_with_server_api_key_variable", ::clientWithoutKeySendsWithServerApiKeyVariable)
+    run("explicit_key_wins_over_server_api_key_variable", ::explicitKeyWinsOverServerApiKeyVariable)
+    run("missing_key_names_the_server_api_key_variable", ::missingKeyNamesTheServerApiKeyVariable)
     run("concurrent_logging_preserves_queue_and_flushes", ::concurrentLoggingPreservesQueueAndFlushes)
     run("bounded_queue_counts_newest_drops_with_reasons", ::boundedQueueCountsNewestDropsWithReasons)
     run("drop_callback_failures_never_reach_the_app", ::dropCallbackFailuresNeverReachTheApp)

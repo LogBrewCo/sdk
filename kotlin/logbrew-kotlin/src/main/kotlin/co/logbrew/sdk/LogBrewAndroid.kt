@@ -113,6 +113,7 @@ object LogBrewAndroid {
         context: TelemetryContext? = null,
         includeAutomaticContext: Boolean = true,
     ): LogBrewClient {
+        Validation.requireNonEmpty("api_key", apiKey)
         val androidContext =
             TelemetryContext(
                 resource =

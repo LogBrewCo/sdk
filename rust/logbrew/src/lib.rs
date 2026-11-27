@@ -92,6 +92,7 @@ pub use delivery::{
     DEFAULT_AUTOMATIC_RETRY_MAX_DELAY, DEFAULT_MAX_BATCH_EVENTS, DEFAULT_MAX_QUEUE_BYTES,
     DEFAULT_MAX_QUEUE_EVENTS, DEFAULT_MAX_REQUEST_BODY_BYTES, DeliveryCodeCategory,
     DeliveryHealthSnapshot, DeliveryOutcome, DeliveryPauseReason, LogBrewClient,
+    SERVER_API_KEY_VARIABLE,
 };
 #[cfg(feature = "hyper")]
 pub use http_client::HttpRequestCaptureError;

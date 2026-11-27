@@ -443,6 +443,40 @@ void flush_success_clears_queue() {
   EXPECT_TRUE(transport.last_body() != nullptr);
 }
 
+class KeyRecordingTransport final : public logbrew::Transport {
+public:
+  logbrew::TransportResponse send(const std::string &api_key, const std::string & /*body*/) override {
+    api_keys.push_back(api_key);
+    return logbrew::TransportResponse{202, 1U};
+  }
+
+  std::vector<std::string> api_keys;
+};
+
+std::vector<std::string> sent_api_keys(const std::string &explicit_key) {
+  logbrew::LogBrewClient client(logbrew::Config{explicit_key, "logbrew-cpp-test", "1.0.0", 0U});
+  client.log("evt_server_key_001", "2026-11-27T10:00:00Z", logbrew::LogAttributes{"first event", "info", std::nullopt});
+  KeyRecordingTransport transport;
+  static_cast<void>(client.flush(transport));
+  return transport.api_keys;
+}
+
+void server_api_key_variable_is_the_fallback() {
+  EXPECT_TRUE(setenv("LOGBREW_SERVER_API_KEY", "env-server-key", 1) == 0);
+  EXPECT_TRUE(sent_api_keys("") == std::vector<std::string>{"env-server-key"});
+  EXPECT_TRUE(sent_api_keys("explicit-key") == std::vector<std::string>{"explicit-key"});
+  EXPECT_TRUE(setenv("LOGBREW_SERVER_API_KEY", " ", 1) == 0);
+  bool rejected = false;
+  try {
+    static_cast<void>(logbrew::LogBrewClient(logbrew::Config{"", "logbrew-cpp-test", "1.0.0", 0U}));
+  } catch (const logbrew::SdkException &error) {
+    rejected = error.code() == "configuration_error" &&
+               std::string(error.what()).find("LOGBREW_SERVER_API_KEY") != std::string::npos;
+  }
+  EXPECT_TRUE(rejected);
+  EXPECT_TRUE(unsetenv("LOGBREW_SERVER_API_KEY") == 0);
+}
+
 logbrew::LogBrewClient bounded_client(std::vector<logbrew::EventDrop> &drops,
                                       std::size_t max_events = logbrew::default_max_queue_events,
                                       std::size_t max_bytes = logbrew::default_max_queue_bytes) {
@@ -718,6 +752,7 @@ int main() {
   metric_description_validation_is_enforced();
   trace_context_helpers_validate_and_correlate();
   flush_success_clears_queue();
+  server_api_key_variable_is_the_fallback();
   empty_flush_is_no_op();
   bounded_queue_counts_newest_drops_with_reasons();
   drop_callback_failures_never_reach_the_app();

@@ -16,6 +16,8 @@ namespace logbrew {
 
 inline constexpr const char *version = "0.2.3";
 inline constexpr const char *http_transport_default_endpoint = "https://api.logbrew.co/v1/events";
+// A client reads this environment variable when Config::api_key is blank.
+inline constexpr const char *server_api_key_variable = "LOGBREW_SERVER_API_KEY";
 inline constexpr std::size_t trace_id_length = 32U;
 inline constexpr std::size_t span_id_length = 16U;
 inline constexpr std::size_t trace_flags_length = 2U;
