@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import { once } from "node:events";
 import path from "node:path";
 import { readField } from "./fields.js";
+import { rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
@@ -17,6 +18,9 @@ import { tmpdir } from "node:os";
 const LAUNCH_TIMEOUT_MS = 60_000;
 const LISTENING = /DevTools listening on (?<url>ws:\/\/\S+)/u;
 const ID_STEP = 1;
+/** @type {readonly NodeJS.Signals[]} */
+const SIGNALS = ["SIGHUP", "SIGINT", "SIGTERM"];
+const PROFILE_REMOVAL = { force: true, maxRetries: 10, recursive: true, retryDelay: 100 };
 const candidates = [
   process.env["CHROME_PATH"] ?? "",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -159,9 +163,9 @@ async function connect(url) {
 }
 
 /**
- * @returns {Promise<Chrome>}
+ * @returns {Promise<{ readonly stderr: import("node:stream").Readable, readonly stop: () => Promise<void> }>}
  */
-async function launchChrome() {
+async function startChrome() {
   const executable = await findChrome();
   const profile = await mkdtemp(path.join(tmpdir(), "logbrew-bench-chrome-"));
   const child = spawn(
@@ -175,25 +179,60 @@ async function launchChrome() {
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
       "about:blank"
     ],
-    { stdio: ["ignore", "ignore", "pipe"] }
+    { detached: true, stdio: ["ignore", "ignore", "pipe"] }
   );
-  const lines = createInterface({ input: child.stderr, signal: AbortSignal.timeout(LAUNCH_TIMEOUT_MS) });
+  /**
+   * @returns {void}
+   */
+  function stopNow() {
+    if (child.exitCode === null && child.signalCode === null && child.pid !== undefined) {
+      process.kill(-child.pid, "SIGKILL");
+    }
+    rmSync(profile, PROFILE_REMOVAL);
+  }
+  /**
+   * @returns {Promise<void>}
+   */
+  async function stop() {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, "exit");
+      child.kill();
+      await exited;
+    }
+    await rm(profile, PROFILE_REMOVAL);
+  }
+  process.once("exit", stopNow);
+  for (const signal of SIGNALS) {
+    process.once(signal, () => {
+      stopNow();
+      process.kill(process.pid, signal);
+    });
+  }
+  return { stderr: child.stderr, stop };
+}
+
+/**
+ * @returns {Promise<Chrome>}
+ */
+async function launchChrome() {
+  const { stderr, stop } = await startChrome();
+  const lines = createInterface({ input: stderr, signal: AbortSignal.timeout(LAUNCH_TIMEOUT_MS) });
   try {
     const { close, send, waitFor } = await connect(await readDebuggerUrl(lines));
     return {
       async close() {
         close();
-        const exited = once(child, "exit");
-        child.kill();
-        await exited;
-        await rm(profile, { force: true, maxRetries: 10, recursive: true, retryDelay: 100 });
+        await stop();
       },
       send,
       waitFor
     };
+  } catch (error) {
+    await stop();
+    throw error;
   } finally {
     lines.close();
-    child.stderr.resume();
+    stderr.resume();
   }
 }
 

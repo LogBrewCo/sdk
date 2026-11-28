@@ -766,6 +766,14 @@
     },
     {
       "files": [
+        "**/benchmarks/overhead/cdp.mjs"
+      ],
+      "rules": {
+        "node/no-sync": "off"
+      }
+    },
+    {
+      "files": [
         "**/benchmarks/size/**"
       ],
       "rules": {
