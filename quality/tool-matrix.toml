@@ -458,7 +458,7 @@ checked = 2026-11-25
 
 [[tool]]
 id = "vsce"
-risk = "a VS Code extension release that never reaches the Visual Studio Marketplace, or one published with a long-lived token"
+risk = "a VS Code extension release that never reaches the Visual Studio Marketplace, or one published outside Microsoft Entra trusted publishing"
 tool = "@vscode/vsce, the Visual Studio Marketplace publishing CLI"
 version = "4.1.1"
 pins = ["apps/vscode/package.json::\"@vscode/vsce\": \"@VERSION@\""]
