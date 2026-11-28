@@ -24,6 +24,7 @@ on:
           - nuget
           - packagist
           - maven
+          - vscode
           - verify
       dry_run:
         description: "Dispatch publish-packages.yml in dry-run mode"

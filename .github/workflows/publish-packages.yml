@@ -22,6 +22,7 @@ on:
           - nuget
           - packagist
           - maven
+          - vscode
           - verify
       dry_run:
         description: "Validate and package without publishing"
@@ -732,6 +733,60 @@ jobs:
       ref: ${{ inputs.ref }}
       dry_run: ${{ inputs.dry_run }}
       nuget_packages: ${{ inputs.nuget_packages }}
+
+  vscode:
+    name: VS Code extension
+    if: ${{ inputs.target == 'all' || inputs.target == 'vscode' }}
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: apps/vscode
+    steps:
+      - name: Check out release ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+
+      - name: Package the VS Code extension
+        run: |
+          set -Eeuo pipefail
+          bun install --frozen-lockfile --ignore-scripts
+          bun run package
+
+      # --skip-duplicate makes a rerun pass when this version is already on the Marketplace.
+      - name: Publish to the VS Code Marketplace
+        if: ${{ ! inputs.dry_run }}
+        run: bun --bun vsce publish --oidc --skip-duplicate --packagePath logbrew.vsix
+
+      - name: Verify the VS Code Marketplace listing
+        if: ${{ ! inputs.dry_run }}
+        run: |
+          set -Eeuo pipefail
+          extension_id="$(jq -r '"\(.publisher).\(.name)"' package.json)"
+          version="$(jq -r .version package.json)"
+          # The Marketplace scans a new version before it lists it; wait up to 15 minutes.
+          deadline=$(( $(date +%s) + 900 ))
+          until bun --bun vsce show "$extension_id" --json \
+            | jq -e --arg version "$version" 'any(.versions[]; .version == $version)' > /dev/null; do
+            if (( $(date +%s) + 30 > deadline )); then
+              echo "$extension_id $version is not on the VS Code Marketplace after 15 minutes" >&2
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "VS Code Marketplace lists $extension_id $version"
+
   packagist:
     name: Packagist package
     if: ${{ inputs.target == 'packagist' || (inputs.target == 'all' && (inputs.dry_run || inputs.include_packagist_update)) }}
