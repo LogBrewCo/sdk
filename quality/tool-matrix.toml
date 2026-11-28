@@ -12,7 +12,7 @@
 # covers every command that starts with it.
 
 gates = ["scripts/check_go_static.sh", "scripts/check_java_static.sh", "scripts/check_js_lint.sh", "scripts/check_kotlin_style.sh", "scripts/check_php_static.sh", "scripts/check_public_sdks.sh", "scripts/check_python_static.sh", "scripts/check_rust_static.sh", "scripts/check_shell_static.sh", "scripts/check_swift_style.sh"]
-utilities = ["[", "[[", "awk", "basename", "bash", "break", "cat", "cd", "chmod", "command", "continue", "curl", "date", "dirname", "echo", "exit", "export", "find", "git", "grep", "kill", "local", "mapfile", "mkdir", "mktemp", "mv", "printf", "read", "rm", "rmdir", "set", "sha256sum", "shasum", "shift", "sleep", "sort", "sudo", "tail", "tar", "tr", "trap", "true", "umask", "uname", "unzip", "wait", "xargs", "redis-cli", "brew", "fetch_java_*", "python_package_version", "run_native_verifier", "sed"]
+utilities = ["[", "[[", "awk", "basename", "bash", "break", "cat", "cd", "chmod", "command", "continue", "curl", "date", "dirname", "echo", "exit", "export", "find", "git", "grep", "jq", "kill", "local", "mapfile", "mkdir", "mktemp", "mv", "printf", "read", "rm", "rmdir", "set", "sha256sum", "shasum", "shift", "sleep", "sort", "sudo", "tail", "tar", "tr", "trap", "true", "umask", "uname", "unzip", "wait", "xargs", "redis-cli", "brew", "fetch_java_*", "python_package_version", "run_native_verifier", "sed"]
 
 [[tool]]
 id = "ruff"
@@ -455,6 +455,22 @@ runtime = "unmeasured; added 2026-11-25"
 findings = "2026-11-25: @logbrew/browser dry-runs with no slow-type warnings; @logbrew/sdk and @logbrew/node stay off JSR because their ESM entry files import CommonJS"
 replaces = "none"
 checked = 2026-11-25
+
+[[tool]]
+id = "vsce"
+risk = "a VS Code extension release that never reaches the Visual Studio Marketplace, or one published with a long-lived token"
+tool = "@vscode/vsce, the Visual Studio Marketplace publishing CLI"
+version = "4.1.1"
+pins = ["apps/vscode/package.json::\"@vscode/vsce\": \"@VERSION@\""]
+commands = ["bun vsce"]
+runs_in = "Publish Packages workflow: the vscode job packages apps/vscode, publishes it with vsce publish --oidc --skip-duplicate in the release environment, then reads the version back with vsce show"
+config = "apps/vscode/package.json: publisher, name, version, and the files list that bun run package bundles into logbrew.vsix"
+conflicts = "none known"
+exceptions = "none"
+runtime = "unmeasured; added 2026-11-28"
+findings = "2026-11-28: vsce 4.1.1 has the --oidc flag for Microsoft Entra trusted publishing; bun run package builds a 10-file, 47.7 KB logbrew.vsix with no src or node_modules"
+replaces = "none"
+checked = 2026-11-28
 [[tool]]
 id = "osv-scanner"
 risk = "a security advisory published against a locked dependency after the change that locked it merged"
