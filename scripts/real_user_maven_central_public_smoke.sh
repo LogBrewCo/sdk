@@ -182,15 +182,15 @@ export LOGBREW_MAVEN_REPOSITORY_UNDER_TEST="$repository_url"
 export LOGBREW_MAVEN_SELECTED_MODULES="$selected_modules_csv"
 
 if [[ -z "$bundle_path" ]] && artifact_selected "logbrew-sdk"; then
-    curl -fsSL "$central_url/co/logbrew/logbrew-sdk/maven-metadata.xml" > "$tmp_dir/logbrew-sdk-metadata.xml"
+    curl -fsSL --retry 8 --retry-delay 15 --retry-max-time 300 "$central_url/co/logbrew/logbrew-sdk/maven-metadata.xml" > "$tmp_dir/logbrew-sdk-metadata.xml"
     grep -q "<version>$java_version</version>" "$tmp_dir/logbrew-sdk-metadata.xml"
 fi
 if [[ -z "$bundle_path" ]] && artifact_selected "logbrew-kotlin"; then
-    curl -fsSL "$central_url/co/logbrew/logbrew-kotlin/maven-metadata.xml" > "$tmp_dir/logbrew-kotlin-metadata.xml"
+    curl -fsSL --retry 8 --retry-delay 15 --retry-max-time 300 "$central_url/co/logbrew/logbrew-kotlin/maven-metadata.xml" > "$tmp_dir/logbrew-kotlin-metadata.xml"
     grep -q "<version>$kotlin_version</version>" "$tmp_dir/logbrew-kotlin-metadata.xml"
 fi
 if [[ -z "$bundle_path" ]] && artifact_selected "logbrew-kotlin-okhttp"; then
-    curl -fsSL "$central_url/co/logbrew/logbrew-kotlin-okhttp/maven-metadata.xml" > "$tmp_dir/logbrew-kotlin-okhttp-metadata.xml"
+    curl -fsSL --retry 8 --retry-delay 15 --retry-max-time 300 "$central_url/co/logbrew/logbrew-kotlin-okhttp/maven-metadata.xml" > "$tmp_dir/logbrew-kotlin-okhttp-metadata.xml"
     grep -q "<version>$okhttp_version</version>" "$tmp_dir/logbrew-kotlin-okhttp-metadata.xml"
 fi
 
