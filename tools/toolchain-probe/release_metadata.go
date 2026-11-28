@@ -1518,6 +1518,7 @@ func (check *metadataCheck) publishPackagesWorkflow(text string) {
 			{"release source runtime verification", `git -C "$GITHUB_WORKSPACE" rev-parse --verify 'HEAD^{commit}'`},
 			{"release-control runtime verification", `git -C "$control_root" rev-parse --verify 'HEAD^{commit}'`},
 			{"protected registry checker execution", protectedRegistryCheck},
+			{"NuGet duplicate-safe publish", "--skip-duplicate"},
 		})
 		check.require(strings.Count(nuget, checkoutDiscardsAuth) >= 2,
 			publishNuGetWorkflow+": both checkouts must discard authentication state")
@@ -1579,7 +1580,6 @@ var publishNeedles = [][2]string{
 	{"NuGet bounded core dependency", `--dependency-range "LogBrew.HttpClient:LogBrew=`},
 	{"NuGet HttpClient compatibility receipt", "real_user_dotnet_httpclient_package_compatibility_smoke.sh"},
 	{"NuGet one-package publish loop", "while IFS= read -r package_path"},
-	{"NuGet duplicate-safe publish", "--skip-duplicate"},
 	{"NuGet symbol publish", "--symbol-source https://api.nuget.org/v3/index.json"},
 	{"NuGet public install smoke", "bash scripts/real_user_dotnet_selected_public_nuget_smoke.sh"},
 	{"NuGet ASP.NET Core lifecycle smoke", "bash scripts/real_user_dotnet_aspnetcore_public_nuget_smoke.sh"},
@@ -1634,4 +1634,6 @@ var publishNeedles = [][2]string{
 	{"Maven exact dependency closure preflight", "--maven-plan-scope dependencies"},
 	{"Maven exact bundle manifest", "--manifest"},
 	{"Maven selected public install smoke", "real_user_maven_central_public_smoke.sh --plan"},
+	{"VS Code Marketplace trusted publishing", "vsce publish --oidc --skip-duplicate --packagePath logbrew.vsix"},
+	{"VS Code Marketplace listing readback", `vsce show "$extension_id" --json`},
 }
